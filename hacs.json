@@ -1,0 +1,7 @@
+{
+  "domains": ["climate"],
+  "content_in_root": false,
+  "name": "Frigidaire Integration",
+  "iot_class": "cloud_polling",
+  "homeassistant": "0.96.0"
+}
