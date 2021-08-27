@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Any
+from typing import List, Any, Mapping
 
 import frigidaire
 
@@ -141,9 +141,12 @@ class FrigidaireDehumidifier(HumidifierEntity):
         return FRIGIDAIRE_TO_HA_MODE[frigidaire_mode]
 
     @property
-    def current_humidity(self):
+    def extra_state_attributes(self) -> Mapping[str, Any] | None:
         """Return the current humidity."""
-        return self._details.for_code(frigidaire.HaclCode.AMBIENT_HUMIDITY).number_value
+        return {
+            "current_humidity": self._details.for_code(frigidaire.HaclCode.AMBIENT_HUMIDITY).number_value,
+            "check_filter": bool(self._details.for_code(frigidaire.HaclCode.AC_CLEAN_FILTER_ALERT).number_value),
+        }
 
     # @property
     # def fan_mode(self):
