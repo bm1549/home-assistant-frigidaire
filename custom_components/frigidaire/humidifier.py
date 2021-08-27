@@ -5,6 +5,7 @@ import logging
 from typing import List, Any, Mapping
 
 import frigidaire
+import voluptuous as vol
 
 from homeassistant.components.humidifier import HumidifierEntity
 from homeassistant.components.humidifier.const import (
@@ -15,6 +16,7 @@ from homeassistant.components.humidifier.const import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv, entity_platform
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -22,10 +24,21 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
+FAN_LOW = "low"
+FAN_HIGH = "high"
+
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up frigidaire from a config entry."""
+    platform = entity_platform.async_get_current_platform()
+    platform.async_register_entity_service(
+        "set_fan_mode",
+        {vol.Required("fan_mode"): cv.string},
+        "set_fan_mode",
+    )
+
     client = hass.data[DOMAIN][entry.entry_id]
 
     def get_entities(username: str, password: str) -> List[frigidaire.Appliance]:
@@ -53,6 +66,16 @@ FRIGIDAIRE_TO_HA_MODE = {
 HA_TO_FRIGIDAIRE_MODE = {
     MODE_NORMAL: frigidaire.Mode.DRY,
     MODE_BOOST: frigidaire.Mode.CONTINUOUS,
+}
+
+FRIGIDAIRE_TO_HA_FAN_MODE = {
+    frigidaire.FanSpeed.LOW.value: FAN_LOW,
+    frigidaire.FanSpeed.HIGH.value: FAN_HIGH,
+}
+
+HA_TO_FRIGIDAIRE_FAN_MODE = {
+    FAN_LOW: frigidaire.FanSpeed.LOW,
+    FAN_HIGH: frigidaire.FanSpeed.HIGH,
 }
 
 
@@ -142,26 +165,21 @@ class FrigidaireDehumidifier(HumidifierEntity):
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
-        """Return the current humidity."""
-        return {
-            "current_humidity": self._details.for_code(frigidaire.HaclCode.AMBIENT_HUMIDITY).number_value,
-            "check_filter": bool(self._details.for_code(frigidaire.HaclCode.AC_CLEAN_FILTER_ALERT).number_value),
-        }
+        fan_speed = self._details.for_code(
+            frigidaire.HaclCode.AC_FAN_SPEED_SETTING
+        ).number_value
 
-    # @property
-    # def fan_mode(self):
-    #     """Return the fan setting."""
-    #     convert = {
-    #         frigidaire.FanSpeed.OFF.value: FAN_OFF,  # when the AC is off
-    #         frigidaire.FanSpeed.LOW.value: FAN_LOW,
-    #         frigidaire.FanSpeed.HIGH.value: FAN_HIGH,
-    #     }
-    #     fan_speed = self._details.for_code(frigidaire.HaclCode.AC_FAN_SPEED_SETTING)
-    #
-    #     if not fan_speed:
-    #         return FAN_OFF
-    #
-    #     return convert[fan_speed.number_value]
+        return {
+            "current_humidity": self._details.for_code(
+                frigidaire.HaclCode.AMBIENT_HUMIDITY
+            ).number_value,
+            "check_filter": bool(
+                self._details.for_code(
+                    frigidaire.HaclCode.AC_CLEAN_FILTER_ALERT
+                ).number_value
+            ),
+            "fan_mode": FRIGIDAIRE_TO_HA_FAN_MODE[fan_speed],
+        }
 
     @property
     def min_humidity(self):
@@ -195,19 +213,14 @@ class FrigidaireDehumidifier(HumidifierEntity):
             self._appliance, frigidaire.Action.set_humidity(humidity)
         )
 
-    # def set_fan_mode(self, fan_mode):
-    #     """Set new target fan mode."""
-    #     convert = {
-    #         FAN_LOW: frigidaire.FanSpeed.LOW,
-    #         FAN_HIGH: frigidaire.FanSpeed.HIGH,
-    #     }
-    #
-    #     # Guard against unexpected fan modes
-    #     if fan_mode not in convert:
-    #         return
-    #
-    #     action = frigidaire.Action.set_fan_speed(convert[fan_mode])
-    #     self._client.execute_action(self._appliance, action)
+    def set_fan_mode(self, fan_mode):
+        """Set new target fan mode."""
+        # Guard against unexpected fan modes
+        if fan_mode not in HA_TO_FRIGIDAIRE_FAN_MODE:
+            return
+
+        action = frigidaire.Action.set_fan_speed(HA_TO_FRIGIDAIRE_FAN_MODE[fan_mode])
+        self._client.execute_action(self._appliance, action)
 
     def set_mode(self, mode):
         """Set new target operation mode."""
