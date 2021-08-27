@@ -43,7 +43,8 @@ async def async_setup_entry(
     )
 
     async_add_entities(
-        [FrigidaireClimate(client, appliance) for appliance in appliances],
+        [FrigidaireClimate(client, appliance) for appliance in appliances
+         if appliance.appliance_class == frigidaire.ApplianceClass.AIR_CONDITIONER],
         update_before_add=True,
     )
 
