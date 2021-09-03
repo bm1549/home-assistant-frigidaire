@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Any, Mapping
+from typing import List, Any, Mapping, Optional
 
 import frigidaire
 import voluptuous as vol
@@ -89,13 +89,13 @@ class FrigidaireDehumidifier(HumidifierEntity):
         appliance: the basic information about the frigidaire appliance, used to contact the API
         """
 
-        self._client = client
-        self._appliance = appliance
-        self._details = None
+        self._client: frigidaire.Frigidaire = client
+        self._appliance: frigidaire.Appliance = appliance
+        self._details: Optional[frigidaire.ApplianceDetails] = None
 
         # Entity Class Attributes
-        self._attr_unique_id = appliance.appliance_id
-        self._attr_name = appliance.nickname
+        self._attr_unique_id = self._appliance.appliance_id
+        self._attr_name = self._appliance.nickname
         self._attr_supported_features = SUPPORT_MODES
 
         # Although we can access the Frigidaire API to get updates, they are
