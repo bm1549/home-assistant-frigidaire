@@ -242,8 +242,14 @@ class FrigidaireDehumidifier(HumidifierEntity):
         try:
             details = self._client.get_appliance_details(self._appliance)
             self._details = details
-            self._attr_available = True
         except frigidaire.FrigidaireException:
             if self.available:
                 _LOGGER.error("Failed to connect to Frigidaire servers")
             self._attr_available = False
+        else:
+            self._attr_available = (
+                self._details.for_code(
+                    frigidaire.HaclCode.CONNECTIVITY_STATE
+                ).string_value
+                == "connect"
+            )
