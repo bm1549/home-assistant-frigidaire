@@ -230,7 +230,7 @@ class FrigidaireDehumidifier(HumidifierEntity):
             return
 
         # Turn on if not currently on.
-        if self._details.for_code(frigidaire.HaclCode.APPLIANCE_STATE) == 0:
+        if self._details.for_code(frigidaire.HaclCode.APPLIANCE_STATE).number_value == 0:
             self.turn_on()
 
         self._client.execute_action(
