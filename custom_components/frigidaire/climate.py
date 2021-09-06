@@ -44,8 +44,11 @@ async def async_setup_entry(
     )
 
     async_add_entities(
-        [FrigidaireClimate(client, appliance) for appliance in appliances
-         if appliance.appliance_class == frigidaire.ApplianceClass.AIR_CONDITIONER],
+        [
+            FrigidaireClimate(client, appliance)
+            for appliance in appliances
+            if appliance.appliance_class == frigidaire.ApplianceClass.AIR_CONDITIONER
+        ],
         update_before_add=True,
     )
 
@@ -287,5 +290,5 @@ class FrigidaireClimate(ClimateEntity):
                 self._details.for_code(
                     frigidaire.HaclCode.CONNECTIVITY_STATE
                 ).string_value
-                == "connect"
+                == frigidaire.ConnectivityState.CONNECTED
             )
