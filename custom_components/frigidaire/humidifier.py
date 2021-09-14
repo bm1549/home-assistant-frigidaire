@@ -152,6 +152,9 @@ class FrigidaireDehumidifier(HumidifierEntity):
             frigidaire.HaclCode.AC_MODE
         ).number_value
 
+        if frigidaire_mode == frigidaire.Mode.OFF:
+            return MODE_NORMAL
+
         return FRIGIDAIRE_TO_HA_MODE[frigidaire_mode]
 
     @property
