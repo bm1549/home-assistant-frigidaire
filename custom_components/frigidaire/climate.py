@@ -290,5 +290,5 @@ class FrigidaireClimate(ClimateEntity):
                 self._details.for_code(
                     frigidaire.HaclCode.CONNECTIVITY_STATE
                 ).string_value
-                == frigidaire.ConnectivityState.CONNECTED.value
+                != frigidaire.ConnectivityState.DISCONNECTED.value
             )
