@@ -19,6 +19,7 @@ from homeassistant.components.climate.const import (
     HVAC_MODE_OFF,
     SUPPORT_FAN_MODE,
     SUPPORT_TARGET_TEMPERATURE,
+    HVACAction,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, TEMP_CELSIUS, TEMP_FAHRENHEIT
@@ -94,7 +95,8 @@ class FrigidaireClimate(ClimateEntity):
         """Build FrigidaireClimate.
 
         client: the client used to contact the frigidaire API
-        appliance: the basic information about the frigidaire appliance, used to contact the API
+        appliance: the basic information about the frigidaire appliance, used to contact
+            the API
         """
 
         self._client: frigidaire.Frigidaire = client
@@ -187,6 +189,27 @@ class FrigidaireClimate(ClimateEntity):
         ).number_value
 
         return FRIGIDAIRE_TO_HA_MODE[frigidaire_mode]
+
+    @property
+    def hvac_action(self):
+        """Return HVAC action
+
+        Prioritize cooling over fan
+        """
+        if self.hvac_mode() == HVAC_MODE_OFF:
+            return HVACAction.IDLE
+
+        if bool(
+            self._details.for_code(frigidaire.HaclCode.COMPRESSOR_STATE).number_value
+        ):
+            return HVACAction.COOLING
+
+        if bool(
+            self._details.for_code(frigidaire.HaclCode.AC_FAN_SPEED_STATE).number_value
+        ):
+            return HVACAction.FAN
+
+        return HVACAction.IDLE
 
     @property
     def current_temperature(self):
