@@ -184,24 +184,18 @@ class FrigidaireDehumidifier(HumidifierEntity):
         }
 
         # The following attributes only exist on some models of dehumidifier
-        if self._details.for_code(frigidaire.HaclCode.BIN_FULL_ALERT) is not None:
-            attrib["bin_full"] = bool(
-                self._details.for_code(
-                    frigidaire.HaclCode.BIN_FULL_ALERT
-                ).number_value
-            )
-        if self._details.for_code(frigidaire.HaclCode.COMPRESSOR_STATE) is not None:
-            attrib["compressor_running"] = bool(
-                self._details.for_code(
-                    frigidaire.HaclCode.COMPRESSOR_STATE
-                ).number_value
-            )
-        if self._details.for_code(frigidaire.HaclCode.AC_FAN_SPEED_STATE) is not None:
-            attrib["fan_running"] = bool(
-                self._details.for_code(
-                    frigidaire.HaclCode.AC_FAN_SPEED_STATE
-                ).number_value
-            )
+        if (bin_full := self._details.for_code(frigidaire.HaclCode.BIN_FULL_ALERT)
+                ) is not None:
+            attrib["bin_full"] = bool(bin_full.number_value)
+
+        if (comp_run := self._details.for_code(frigidaire.HaclCode.COMPRESSOR_STATE)
+                ) is not None:
+            attrib["compressor_running"] = bool(comp_run.number_value)
+
+        if (fan_run := self._details.for_code(frigidaire.HaclCode.AC_FAN_SPEED_STATE)
+                ) is not None:
+            attrib["fan_running"] = bool(fan_run.number_value)
+
         return attrib
 
     @property
