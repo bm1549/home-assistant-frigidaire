@@ -196,7 +196,7 @@ class FrigidaireClimate(ClimateEntity):
 
         Prioritize cooling over fan
         """
-        if self.hvac_mode() == HVAC_MODE_OFF:
+        if self.hvac_mode == HVAC_MODE_OFF:
             return HVACAction.IDLE
 
         if bool(
