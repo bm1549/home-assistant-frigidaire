@@ -197,16 +197,19 @@ class FrigidaireClimate(ClimateEntity):
         Prioritize cooling over fan
         """
         if self.hvac_mode == HVAC_MODE_OFF:
-            return HVACAction.IDLE
+            return HVACAction.OFF
 
-        if bool(
-            self._details.for_code(frigidaire.HaclCode.COMPRESSOR_STATE).number_value
-        ):
+        compressor_state = self._details.for_code(frigidaire.HaclCode.COMPRESSOR_STATE)
+
+        if compressor_state is not None and bool(compressor_state.number_value):
             return HVACAction.COOLING
 
-        if bool(
-            self._details.for_code(frigidaire.HaclCode.AC_FAN_SPEED_STATE).number_value
-        ):
+        fan_speed = self._details.for_code(frigidaire.HaclCode.AC_FAN_SPEED_STATE)
+
+        if fan_speed is None:
+            return HVACAction.IDLE
+
+        if bool(fan_speed.number_value):
             return HVACAction.FAN
 
         return HVACAction.IDLE
