@@ -23,7 +23,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except ConnectionError as err:
             raise ConfigEntryNotReady("Cannot connect to Frigidaire") from err
         except frigidaire.FrigidaireException as err:
-            raise data_entry_flow.AbortFlow from err
+            raise data_entry_flow.AbortFlow("Frigidaire backend exception") from err
 
     await hass.async_add_executor_job(
         setup, entry.data["username"], entry.data["password"]
