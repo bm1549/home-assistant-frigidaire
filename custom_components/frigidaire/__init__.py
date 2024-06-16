@@ -1,6 +1,8 @@
 """The frigidaire integration."""
 from __future__ import annotations
 
+import traceback
+
 import frigidaire
 
 from homeassistant import data_entry_flow
@@ -24,8 +26,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             raise ConfigEntryNotReady("Cannot connect to Frigidaire") from err
         except frigidaire.FrigidaireException as err:
             # Handle frigidaire 429 gracefully
-            if "cas_3403" in str(err):
-                raise data_entry_flow.AbortFlow("You have exceeded the maximum number of active sessions. Please log out of another device or wait until an existing session expires.") from err
+            if "cas_3403" in traceback.format_exc():
+                raise data_entry_flow.AbortFlow("You have exceeded Frigidaire's maximum number of active sessions. Please log out of another device or wait until an existing session expires.") from err
             raise data_entry_flow.AbortFlow("Frigidaire backend exception") from err
 
     await hass.async_add_executor_job(
