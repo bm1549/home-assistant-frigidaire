@@ -11,7 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
-from .config_flow import load_auth, save_auth
+from .config_flow import load_auth, save_auth, AUTH_FILE
 from .const import DOMAIN, PLATFORMS
 
 
@@ -20,7 +20,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     def setup(username: str, password: str) -> None:
-        auth_path = os.path.join(hass.config.path(), "frigidaire.conf")
+        auth_path: str = os.path.join(hass.config.path(), AUTH_FILE)
 
         try:
             session_key, regional_base_url = load_auth(auth_path)

@@ -20,13 +20,18 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema({"username": str, "password": str})
 
+AUTH_FILE = 'frigidaire.json'
+
 
 def load_auth(auth_path: str) -> tuple[Optional[str], Optional[str]]:
-    if os.path.exists(auth_path):
-        if os.path.getsize(auth_path) > 0:
-            with open(auth_path, 'r') as f:
-                obj: dict = json.loads(f.read())
-                return obj.get('session_key'), obj.get('regional_base_url')
+    if not os.path.exists(auth_path):
+        with open(auth_path, 'w'):
+            pass
+
+    if os.path.getsize(auth_path) > 0:
+        with open(auth_path, 'r') as f:
+            obj: dict = json.loads(f.read())
+            return obj.get('session_key'), obj.get('regional_base_url')
     return None, None
 
 
@@ -42,7 +47,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]):
     """
 
     def setup(username: str, password: str) -> list[frigidaire.Appliance]:
-        auth_path = os.path.join(hass.config.path(), "frigidaire.conf")
+        auth_path = os.path.join(hass.config.path(), AUTH_FILE)
 
         try:
             session_key, regional_base_url = load_auth(auth_path)
