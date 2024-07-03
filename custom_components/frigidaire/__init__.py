@@ -1,6 +1,7 @@
 """The frigidaire integration."""
 from __future__ import annotations
 
+import os
 import traceback
 
 import frigidaire
@@ -10,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
+from .config_flow import load_auth, save_auth, AUTH_FILE
 from .const import DOMAIN, PLATFORMS
 
 
@@ -17,11 +19,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up frigidaire from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    def setup(username: str, password: str) -> frigidaire.Frigidaire:
+    def setup(username: str, password: str) -> None:
+        auth_path: str = os.path.join(hass.config.path(), AUTH_FILE)
+
         try:
-            hass.data[DOMAIN][entry.entry_id] = frigidaire.Frigidaire(
-                username, password, timeout=60
+            session_key, regional_base_url = load_auth(auth_path)
+            client = frigidaire.Frigidaire(
+                username=username,
+                password=password,
+                timeout=60,
+                session_key=session_key,
+                regional_base_url=regional_base_url
             )
+            save_auth(auth_path, client.session_key, client.regional_base_url)
+
+            hass.data[DOMAIN][entry.entry_id] = client
         except ConnectionError as err:
             raise ConfigEntryNotReady("Cannot connect to Frigidaire") from err
         except frigidaire.FrigidaireException as err:
