@@ -263,6 +263,12 @@ class FrigidaireClimate(ClimateEntity):
                 self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON)
             )
 
+            # temperature reverts to default when the device is turned on
+            self._client.execute_action(
+                self._appliance,
+                frigidaire.Action.set_temperature(self.target_temperature)
+            )
+
         self._client.execute_action(
             self._appliance,
             frigidaire.Action.set_mode(HA_TO_FRIGIDAIRE_HVAC_MODE[hvac_mode]),
