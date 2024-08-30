@@ -235,8 +235,15 @@ class FrigidaireClimate(ClimateEntity):
             return
         temperature = int(temperature)
 
+        if self.temperature_unit == TEMP_FAHRENHEIT:
+            action = frigidaire.Action.set_temperature_f(temperature)
+            _LOGGER.debug("Setting temperature to int({}) via set_temperature_f".format(temperature))
+        else:
+            action = frigidaire.Action.set_temperature_c(temperature)
+            _LOGGER.debug("Setting temperature to int({}) via set_temperature_c".format(temperature))
+
         self._client.execute_action(
-            self._appliance, frigidaire.Action.set_temperature(temperature)
+            self._appliance, action
         )
 
     def set_fan_mode(self, fan_mode):
