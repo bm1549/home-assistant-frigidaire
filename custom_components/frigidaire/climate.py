@@ -189,7 +189,10 @@ class FrigidaireClimate(ClimateEntity):
     @property
     def current_temperature(self):
         """Return the current temperature."""
-        return self._details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_F)
+        if self.temperature_unit == TEMP_FAHRENHEIT:
+            return self._details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_F)
+        else:
+            return self._details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_C)
 
     @property
     def fan_mode(self):
