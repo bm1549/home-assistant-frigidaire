@@ -14,7 +14,7 @@ from homeassistant.components.climate.const import (
     FAN_MEDIUM,
     FAN_OFF,
     HVACMode,
-    ClimateEntityFeature,
+    ClimateEntityFeature, PRESET_ECO,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
@@ -58,7 +58,8 @@ FRIGIDAIRE_TO_HA_MODE = {
     frigidaire.Mode.OFF: HVACMode.OFF,
     frigidaire.Mode.COOL: HVACMode.COOL,
     frigidaire.Mode.FAN: HVACMode.FAN_ONLY,
-    frigidaire.Mode.ECO: HVACMode.AUTO,
+    frigidaire.Mode.ECO: PRESET_ECO,
+    frigidaire.Mode.AUTO: HVACMode.AUTO,
 }
 
 FRIGIDAIRE_TO_HA_FAN_SPEED = {
@@ -81,7 +82,8 @@ HA_TO_FRIGIDAIRE_FAN_MODE = {
 }
 
 HA_TO_FRIGIDAIRE_HVAC_MODE = {
-    HVACMode.AUTO: frigidaire.Mode.ECO,
+    HVACMode.AUTO: frigidaire.Mode.AUTO,
+    PRESET_ECO: frigidaire.Mode.ECO,
     HVACMode.FAN_ONLY: frigidaire.Mode.FAN,
     HVACMode.COOL: frigidaire.Mode.COOL,
     HVACMode.OFF: frigidaire.Mode.OFF,
