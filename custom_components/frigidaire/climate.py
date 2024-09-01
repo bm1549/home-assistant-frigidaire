@@ -72,6 +72,11 @@ FRIGIDAIRE_TO_HA_FAN_SPEED = {
     frigidaire.FanSpeed.HIGH: FAN_HIGH,
 }
 
+HA_TO_FRIGIDAIRE_UNIT = {
+    TEMP_FAHRENHEIT: frigidaire.Unit.FAHRENHEIT,
+    TEMP_CELSIUS: frigidaire.Unit.CELSIUS,
+}
+
 HA_TO_FRIGIDAIRE_FAN_MODE = {
     FAN_AUTO: frigidaire.FanSpeed.AUTO,
     FAN_LOW: frigidaire.FanSpeed.LOW,
@@ -234,16 +239,11 @@ class FrigidaireClimate(ClimateEntity):
         if temperature is None:
             return
         temperature = int(temperature)
+        temperature_unit = HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]
 
-        if self.temperature_unit == TEMP_FAHRENHEIT:
-            action = frigidaire.Action.set_temperature_f(temperature)
-            _LOGGER.debug("Setting temperature to int({}) via set_temperature_f".format(temperature))
-        else:
-            action = frigidaire.Action.set_temperature_c(temperature)
-            _LOGGER.debug("Setting temperature to int({}) via set_temperature_c".format(temperature))
-
+        _LOGGER.debug("Setting temperature to int({}) {}}".format(temperature, self.temperature_unit))
         self._client.execute_action(
-            self._appliance, action
+            self._appliance, frigidaire.Action.set_temperature(temperature, temperature_unit)
         )
 
     def set_fan_mode(self, fan_mode):
