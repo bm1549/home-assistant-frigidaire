@@ -241,7 +241,7 @@ class FrigidaireClimate(ClimateEntity):
         temperature = int(temperature)
         temperature_unit = HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]
 
-        _LOGGER.debug("Setting temperature to int({}) {}}".format(temperature, self.temperature_unit))
+        _LOGGER.debug("Setting temperature to int({}) {}".format(temperature, self.temperature_unit))
         self._client.execute_action(
             self._appliance, frigidaire.Action.set_temperature(temperature, temperature_unit)
         )
