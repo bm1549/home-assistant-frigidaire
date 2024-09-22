@@ -1,6 +1,16 @@
 {
   "version": "0.1.0",
-  "name": "Frigidaire",
+  "domain": "frigidaire",
+  "name": "frigidaire",
   "config_flow": true,
-  "domain": "frigidaire"
+  "documentation": "https://www.home-assistant.io/integrations/frigidaire",
+  "requirements": [
+    "frigidaire==0.18.23"
+  ],
+  "dependencies": [],
+  "codeowners": [
+    "@bm1549"
+  ],
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/bm1549/home-assistant-frigidaire/issues"
 }
