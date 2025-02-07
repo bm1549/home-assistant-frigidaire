@@ -177,8 +177,18 @@ class FrigidaireDehumidifier(HumidifierEntity):
         }
 
         # The following attributes only exist on some models of dehumidifier
-        if (alerts := self._details.get(frigidaire.Detail.ALERTS)) is not None:
-            attrib["bin_full"] = frigidaire.Alert.BUCKET_FULL in alerts
+        bin_full = False
+        alerts = self._details.get(frigidaire.Detail.ALERTS)
+        if alerts is not None:
+            bin_full = (frigidaire.Alert.BUCKET_FULL in alerts)
+
+        # Fallback to waterBucketLevel if alert is not set
+        if not bin_full:
+            water_bucket_level = self._details.get(frigidaire.Detail.WATER_BUCKET_LEVEL)
+            if water_bucket_level == 1:
+                bin_full = True
+
+        attrib["bin_full"] = bin_full
 
         return attrib
 
