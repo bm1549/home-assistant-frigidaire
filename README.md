@@ -13,3 +13,6 @@
 4. Go to Configuration > Integrations and add the Frigidaire integration (should be in the list now)
 5. It should prompt you for your username (email) and password. Fill those in and hit Submit
 6. It should say it successfully added N number of climate entities.
+
+## HACS Integration
+Pending merge of https://github.com/hacs/default/pull/2739
