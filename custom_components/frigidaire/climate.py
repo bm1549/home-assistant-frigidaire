@@ -80,11 +80,12 @@ HA_TO_FRIGIDAIRE_FAN_MODE = {
     FAN_HIGH: frigidaire.FanSpeed.HIGH,
 }
 
-HA_TO_FRIGIDAIRE_HVAC_MODE = {
-    HVACMode.AUTO: frigidaire.Mode.ECO,
-    HVACMode.FAN_ONLY: frigidaire.Mode.FAN,
-    HVACMode.COOL: frigidaire.Mode.COOL,
-    HVACMode.OFF: frigidaire.Mode.OFF,
+FRIGIDAIRE_TO_HA_MODE = {
+    frigidaire.Mode.OFF: HVACMode.OFF,
+    frigidaire.Mode.COOL: HVACMode.COOL,
+    frigidaire.Mode.FAN: HVACMode.FAN_ONLY,
+    frigidaire.Mode.AUTO: HVACMode.AUTO,
+    # frigidaire.Mode.ECO: HVACMode.ECO,  # Disabled, see issue #39 of bm1549/home-assistant-frigidaire
 }
 
 
