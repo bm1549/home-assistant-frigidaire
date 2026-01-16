@@ -25,6 +25,13 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
+def _normalize_enum_value(value):
+    """Normalize API values to uppercase for enum comparison."""
+    if isinstance(value, str):
+        return value.upper()
+    return value
+
+
 FAN_LOW = "low"
 FAN_MEDIUM = "medium"
 FAN_HIGH = "high"
@@ -136,7 +143,7 @@ class FrigidaireDehumidifier(HumidifierEntity):
 
     @property
     def is_on(self):
-        return self._details.get(frigidaire.Detail.APPLIANCE_STATE) == frigidaire.ApplianceState.RUNNING
+        return _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE)) == frigidaire.ApplianceState.RUNNING
 
     @property
     def supported_features(self):
@@ -156,7 +163,7 @@ class FrigidaireDehumidifier(HumidifierEntity):
     @property
     def mode(self):
         """Return current operation i.e. dry, continuous."""
-        frigidaire_mode = self._details.get(frigidaire.Detail.MODE)
+        frigidaire_mode = _normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
 
         if frigidaire_mode == frigidaire.Mode.OFF:
             return MODE_NORMAL
@@ -166,12 +173,12 @@ class FrigidaireDehumidifier(HumidifierEntity):
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
         """Add extra state attributes specific to Frigidaire dehumidifiers"""
-        fan_speed = self._details.get(frigidaire.Detail.FAN_SPEED)
+        fan_speed = _normalize_enum_value(self._details.get(frigidaire.Detail.FAN_SPEED))
 
         attrib = {
             "current_humidity": self._details.get(frigidaire.Detail.SENSOR_HUMIDITY),
             "check_filter": bool(
-                self._details.get(frigidaire.Detail.FILTER_STATE) != frigidaire.FilterState.GOOD
+                _normalize_enum_value(self._details.get(frigidaire.Detail.FILTER_STATE)) != frigidaire.FilterState.GOOD
             ),
             "fan_mode": FRIGIDAIRE_TO_HA_FAN_MODE[fan_speed],
         }
@@ -247,7 +254,7 @@ class FrigidaireDehumidifier(HumidifierEntity):
             return
 
         # Turn on if not currently on.
-        if self._details.get(frigidaire.Detail.APPLIANCE_STATE) == frigidaire.ApplianceState.OFF:
+        if _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE)) == frigidaire.ApplianceState.OFF:
             self.turn_on()
 
         self._client.execute_action(
