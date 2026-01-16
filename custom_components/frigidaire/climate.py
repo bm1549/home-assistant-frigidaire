@@ -293,7 +293,7 @@ class FrigidaireClimate(ClimateEntity):
                 _LOGGER.error("Failed to connect to Frigidaire servers")
             self._attr_available = False
         else:
-            self._attr_available = (
-                self._details.get("connectivityState")
-                == "connected"
-            )
+            # If we successfully retrieved details, the appliance is available
+            # Check that we have a valid applianceState
+            appliance_state = self._details.get(frigidaire.Detail.APPLIANCE_STATE)
+            self._attr_available = appliance_state is not None
