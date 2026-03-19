@@ -66,6 +66,7 @@ FRIGIDAIRE_TO_HA_MODE = {
     frigidaire.Mode.COOL: HVACMode.COOL,
     frigidaire.Mode.FAN: HVACMode.FAN_ONLY,
     frigidaire.Mode.ECO: HVACMode.AUTO,
+    frigidaire.Mode.AUTO: HVACMode.AUTO,
 }
 
 FRIGIDAIRE_TO_HA_FAN_SPEED = {
