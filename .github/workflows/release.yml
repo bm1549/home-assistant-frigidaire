@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Don't run on the version bump commit itself
+    if: "!startsWith(github.event.head_commit.message, 'Bump version to')"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Bump patch version in manifest.json
+        id: bump
+        run: |
+          CURRENT=$(jq -r '.version' custom_components/frigidaire/manifest.json)
+          IFS='.' read -ra PARTS <<< "$CURRENT"
+          PARTS[2]=$((PARTS[2] + 1))
+          NEW="${PARTS[0]}.${PARTS[1]}.${PARTS[2]}"
+          jq --arg v "$NEW" '.version = $v' custom_components/frigidaire/manifest.json > tmp.json
+          mv tmp.json custom_components/frigidaire/manifest.json
+          echo "version=$NEW" >> $GITHUB_OUTPUT
+
+      - name: Commit and tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add custom_components/frigidaire/manifest.json
+          git commit -m "Bump version to ${{ steps.bump.outputs.version }}"
+          git tag ${{ steps.bump.outputs.version }}
+          git push
+          git push --tags
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.bump.outputs.version }}
+          name: ${{ steps.bump.outputs.version }}
+          generate_release_notes: true
