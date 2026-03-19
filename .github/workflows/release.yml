@@ -23,8 +23,11 @@ jobs:
       - name: Bump patch version in manifest.json
         id: bump
         run: |
-          CURRENT=$(jq -r '.version' custom_components/frigidaire/manifest.json)
-          IFS='.' read -ra PARTS <<< "$CURRENT"
+          LATEST=$(git tag --sort=-v:refname | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+          if [ -z "$LATEST" ]; then
+            LATEST=$(jq -r '.version' custom_components/frigidaire/manifest.json)
+          fi
+          IFS='.' read -ra PARTS <<< "$LATEST"
           PARTS[2]=$((PARTS[2] + 1))
           NEW="${PARTS[0]}.${PARTS[1]}.${PARTS[2]}"
           jq --arg v "$NEW" '.version = $v' custom_components/frigidaire/manifest.json > tmp.json
