@@ -67,6 +67,7 @@ FRIGIDAIRE_TO_HA_MODE = {
     frigidaire.Mode.FAN: HVACMode.FAN_ONLY,
     frigidaire.Mode.ECO: HVACMode.AUTO,
     frigidaire.Mode.AUTO: HVACMode.AUTO,
+    frigidaire.Mode.DRY: HVACMode.DRY,
 }
 
 FRIGIDAIRE_TO_HA_FAN_SPEED = {
@@ -93,6 +94,7 @@ HA_TO_FRIGIDAIRE_HVAC_MODE = {
     HVACMode.FAN_ONLY: frigidaire.Mode.FAN,
     HVACMode.COOL: frigidaire.Mode.COOL,
     HVACMode.OFF: frigidaire.Mode.OFF,
+    HVACMode.DRY: frigidaire.Mode.DRY,
 }
 
 
@@ -137,6 +139,7 @@ class FrigidaireClimate(ClimateEntity):
             HVACMode.COOL,
             HVACMode.AUTO,
             HVACMode.FAN_ONLY,
+            HVACMode.DRY,
         ]
 
     @property
