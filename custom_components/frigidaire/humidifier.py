@@ -136,6 +136,16 @@ class FrigidaireDehumidifier(HumidifierEntity):
     def unique_id(self):
         """Return unique ID based on Frigidaire ID."""
         return self._attr_unique_id
+    
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._appliance.appliance_id)},
+            "name": self._appliance.nickname,
+            "manufacturer": "Frigidaire",
+            "model": "AC",
+            "via_device": (DOMAIN, self._appliance.appliance_id),
+        }
 
     @property
     def name(self):
