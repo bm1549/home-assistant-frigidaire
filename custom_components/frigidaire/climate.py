@@ -1,4 +1,5 @@
 """ClimateEntity for frigidaire integration."""
+
 from __future__ import annotations
 
 import logging
@@ -116,10 +117,12 @@ class FrigidaireClimate(ClimateEntity):
         # Entity Class Attributes
         self._attr_unique_id = self._appliance.appliance_id
         self._attr_name = self._appliance.nickname
-        self._attr_supported_features = (ClimateEntityFeature.TARGET_TEMPERATURE |
-                                         ClimateEntityFeature.FAN_MODE |
-                                         ClimateEntityFeature.TURN_OFF |
-                                         ClimateEntityFeature.TURN_ON)
+        self._attr_supported_features = (
+            ClimateEntityFeature.TARGET_TEMPERATURE
+            | ClimateEntityFeature.FAN_MODE
+            | ClimateEntityFeature.TURN_OFF
+            | ClimateEntityFeature.TURN_ON
+        )
         self._attr_target_temperature_step = 1
 
         # Although we can access the Frigidaire API to get updates, they are
@@ -180,9 +183,9 @@ class FrigidaireClimate(ClimateEntity):
     @property
     def temperature_unit(self):
         """Return the unit of measurement which this thermostat uses."""
-        unit = _normalize_enum_value(self._details.get(
-            frigidaire.Detail.TEMPERATURE_REPRESENTATION
-        ))
+        unit = _normalize_enum_value(
+            self._details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION)
+        )
 
         return FRIGIDAIRE_TO_HA_UNIT[unit]
 
@@ -197,7 +200,9 @@ class FrigidaireClimate(ClimateEntity):
     @property
     def hvac_mode(self):
         """Return current operation i.e. heat, cool, idle."""
-        frigidaire_mode = _normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
+        frigidaire_mode = _normalize_enum_value(
+            self._details.get(frigidaire.Detail.MODE)
+        )
 
         return FRIGIDAIRE_TO_HA_MODE[frigidaire_mode]
 
@@ -212,7 +217,9 @@ class FrigidaireClimate(ClimateEntity):
     @property
     def fan_mode(self):
         """Return the fan setting."""
-        fan_speed = _normalize_enum_value(self._details.get(frigidaire.Detail.FAN_SPEED))
+        fan_speed = _normalize_enum_value(
+            self._details.get(frigidaire.Detail.FAN_SPEED)
+        )
 
         if not fan_speed:
             return FAN_OFF
@@ -239,7 +246,8 @@ class FrigidaireClimate(ClimateEntity):
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
         return {
             "check_filter": bool(
-                _normalize_enum_value(self._details.get(frigidaire.Detail.FILTER_STATE)) == "CHANGE"
+                _normalize_enum_value(self._details.get(frigidaire.Detail.FILTER_STATE))
+                == "CHANGE"
             ),
         }
 
@@ -251,9 +259,14 @@ class FrigidaireClimate(ClimateEntity):
         temperature = int(temperature)
         temperature_unit = HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]
 
-        _LOGGER.debug("Setting temperature to int({}) {}".format(temperature, self.temperature_unit))
+        _LOGGER.debug(
+            "Setting temperature to int({}) {}".format(
+                temperature, self.temperature_unit
+            )
+        )
         self._client.execute_action(
-            self._appliance, frigidaire.Action.set_temperature(temperature, temperature_unit)
+            self._appliance,
+            frigidaire.Action.set_temperature(temperature, temperature_unit),
         )
 
     def set_fan_mode(self, fan_mode):
@@ -278,7 +291,10 @@ class FrigidaireClimate(ClimateEntity):
             return
 
         # Turn on if not currently on.
-        if _normalize_enum_value(self._details.get(frigidaire.Detail.MODE)) == frigidaire.Mode.OFF:
+        if (
+            _normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
+            == frigidaire.Mode.OFF
+        ):
             self._client.execute_action(
                 self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON)
             )
@@ -286,7 +302,7 @@ class FrigidaireClimate(ClimateEntity):
             # temperature reverts to default when the device is turned on
             self._client.execute_action(
                 self._appliance,
-                frigidaire.Action.set_temperature(int(self.target_temperature))
+                frigidaire.Action.set_temperature(int(self.target_temperature)),
             )
 
         self._client.execute_action(

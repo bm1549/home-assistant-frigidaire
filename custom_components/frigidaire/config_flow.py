@@ -1,4 +1,5 @@
 """Config flow for frigidaire integration."""
+
 from __future__ import annotations
 
 import json
@@ -20,24 +21,29 @@ _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema({"username": str, "password": str})
 
-AUTH_FILE = 'frigidaire.json'
+AUTH_FILE = "frigidaire.json"
 
 
 def load_auth(auth_path: str) -> tuple[Optional[str], Optional[str]]:
     if not os.path.exists(auth_path):
-        with open(auth_path, 'w'):
+        with open(auth_path, "w"):
             pass
 
     if os.path.getsize(auth_path) > 0:
-        with open(auth_path, 'r') as f:
+        with open(auth_path, "r") as f:
             obj: dict = json.loads(f.read())
-            return obj.get('session_key'), obj.get('regional_base_url')
+            return obj.get("session_key"), obj.get("regional_base_url")
     return None, None
 
 
 def save_auth(auth_path: str, session_key: str, regional_base_url: str) -> None:
-    with open(auth_path, 'w') as f:
-        json.dump({'session_key': session_key, 'regional_base_url': regional_base_url}, f, ensure_ascii=False, indent=4)
+    with open(auth_path, "w") as f:
+        json.dump(
+            {"session_key": session_key, "regional_base_url": regional_base_url},
+            f,
+            ensure_ascii=False,
+            indent=4,
+        )
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]):
@@ -56,7 +62,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]):
                 password=password,
                 timeout=60,
                 session_key=session_key,
-                regional_base_url=regional_base_url
+                regional_base_url=regional_base_url,
             )
             save_auth(auth_path, client.session_key, client.regional_base_url)
 
