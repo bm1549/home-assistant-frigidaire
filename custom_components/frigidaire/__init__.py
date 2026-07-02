@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+import threading
 import traceback
 
 from homeassistant import data_entry_flow
@@ -12,8 +12,12 @@ from homeassistant.exceptions import ConfigEntryNotReady
 
 import frigidaire
 
-from .config_flow import AUTH_FILE, load_auth, save_auth
+from .auth_store import load_auth, per_entry_auth_path, resolve_initial_auth_path, save_auth
 from .const import DOMAIN, PLATFORMS
+
+# Guards writes to an entry's auth file: the client may re-authenticate from
+# multiple entity worker threads, so its persist callback can fire concurrently.
+_AUTH_WRITE_LOCK = threading.Lock()
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -21,18 +25,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     def setup(username: str, password: str) -> None:
-        auth_path: str = os.path.join(hass.config.path(), AUTH_FILE)
+        # Each entry persists to its own file so multiple accounts don't clobber
+        # each other's session keys (which would force re-auth and trip cas_3403).
+        auth_path: str = per_entry_auth_path(hass.config.path(), entry.entry_id)
+
+        def persist_session_key(session_key: str, regional_base_url: str | None) -> None:
+            # Called whenever the client mints a new session key, including on
+            # runtime re-authentication. Persisting it means a still-valid token
+            # survives restarts instead of being abandoned — abandoned sessions
+            # linger server-side and trip Frigidaire's active-session cap (cas_3403).
+            with _AUTH_WRITE_LOCK:
+                save_auth(auth_path, session_key, regional_base_url)
 
         try:
-            session_key, regional_base_url = load_auth(auth_path)
+            # Fall back to the legacy shared file on first run so an existing
+            # cached key is migrated instead of forcing a re-auth.
+            session_key, regional_base_url = load_auth(resolve_initial_auth_path(hass.config.path(), entry.entry_id))
             client = frigidaire.Frigidaire(
                 username=username,
                 password=password,
                 timeout=60,
                 session_key=session_key,
                 regional_base_url=regional_base_url,
+                on_session_key_update=persist_session_key,
             )
-            save_auth(auth_path, client.session_key, client.regional_base_url)
+            persist_session_key(client.session_key, client.regional_base_url)
 
             hass.data[DOMAIN][entry.entry_id] = client
         except ConnectionError as err:
