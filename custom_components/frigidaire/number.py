@@ -20,6 +20,12 @@ from .helpers import suggest_area
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def _normalize(value):
+    if isinstance(value, str):
+        return value.upper()
+    return value
+
 STEP_SECONDS = 1800   # 30 minutes
 MAX_SECONDS = 86400   # 24 hours
 OPTIMISTIC_WINDOW = 5  # seconds to hold optimistic state after a command
@@ -76,10 +82,16 @@ class FrigidaireTimerNumber(NumberEntity):
     def native_value(self) -> float:
         if time.monotonic() < self._optimistic_until:
             return self._optimistic_value or 0
-        if self._details is None:
+        appliance_state = _normalize(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
+        if self._timer_type == "on":
+            active = appliance_state in (frigidaire.ApplianceState.OFF, frigidaire.ApplianceState.DELAYED_START)
+            detail_key = frigidaire.Detail.START_TIME
+        else:
+            active = appliance_state == frigidaire.ApplianceState.RUNNING
+            detail_key = frigidaire.Detail.STOP_TIME
+        if not active:
             return 0
-        detail_key = frigidaire.Detail.START_TIME if self._timer_type == "on" else frigidaire.Detail.STOP_TIME
-        return self._details.get(detail_key) or 0
+        return max(0, self._details.get(detail_key) or 0)
 
     def set_native_value(self, value: float) -> None:
         seconds = int(round(value / STEP_SECONDS) * STEP_SECONDS)
