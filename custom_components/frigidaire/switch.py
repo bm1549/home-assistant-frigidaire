@@ -79,14 +79,13 @@ SWITCH_DESCRIPTIONS: dict[str, SwitchDescription] = {
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up frigidaire switch entities from a config entry."""
-    client = hass.data[DOMAIN][entry.entry_id]
+    client = hass.data[DOMAIN][entry.entry_id]["client"]
+    appliances: list[frigidaire.Appliance] = hass.data[DOMAIN][entry.entry_id]["appliances"]
     # options is keyed by appliance_id -> {switch_key: bool}
     options: dict[str, dict[str, bool]] = entry.options
 
     if not options:
         return
-
-    appliances: list[frigidaire.Appliance] = await hass.async_add_executor_job(client.get_appliances)
 
     entities = [
         FrigidaireSwitch(client, appliance, SWITCH_DESCRIPTIONS[key], suggest_area(hass, appliance.nickname))
@@ -105,7 +104,7 @@ class FrigidaireSwitch(SwitchEntity):
         self._client = client
         self._appliance = appliance
         self._desc = desc
-        self._details: dict | None = None
+        self._details: dict = {}
         self._attr_unique_id = f"{appliance.appliance_id}_{desc.key}"
         self._attr_name = desc.name
         self._attr_device_class = desc.device_class
@@ -119,15 +118,16 @@ class FrigidaireSwitch(SwitchEntity):
 
     @property
     def is_on(self) -> bool | None:
-        if self._details is None:
+        raw = self._details.get(self._desc.detail)
+        if raw is None:
             return None
-        raw = _normalize(self._details.get(self._desc.detail))
         on_val = self._desc.on_value
         if isinstance(on_val, bool):
-            return bool(raw) == on_val
-        if isinstance(on_val, str):
-            on_val = on_val.upper()
-        return raw == on_val
+            # API may return a bool or a string "true"/"false"
+            if isinstance(raw, bool):
+                return raw == on_val
+            return str(raw).upper() == "TRUE" if on_val else str(raw).upper() == "FALSE"
+        return _normalize(raw) == str(on_val).upper()
 
     def turn_on(self, **kwargs: Any) -> None:
         self._client.execute_action(self._appliance, self._desc.make_action(True))

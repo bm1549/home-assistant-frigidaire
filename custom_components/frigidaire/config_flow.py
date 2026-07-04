@@ -111,6 +111,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.exception("Unexpected exception")
             errors["base"] = "unknown"
         else:
+            await self.async_set_unique_id(user_input["username"].lower())
+            self._abort_if_unique_id_configured()
             self._user_input = user_input
             self._appliances = appliances
             self._pending_appliances = list(appliances)
@@ -144,17 +146,17 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for the frigidaire integration."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self._config_entry = config_entry
+        self._entry_id = config_entry.entry_id
         self._appliances: list[frigidaire.Appliance] = []
         self._pending_appliances: list[frigidaire.Appliance] = []
         self._options: dict[str, dict[str, bool]] = {}
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Load appliances then start per-device steps."""
-        client = self.hass.data[DOMAIN][self._config_entry.entry_id]
-        self._appliances = await self.hass.async_add_executor_job(client.get_appliances)
+        entry = self.hass.config_entries.async_get_entry(self._entry_id)
+        self._appliances = self.hass.data[DOMAIN][self._entry_id]["appliances"]
         self._pending_appliances = list(self._appliances)
-        self._options = dict(self._config_entry.options)
+        self._options = dict(entry.options)
         return await self._async_next_device_step()
 
     async def _async_next_device_step(self) -> FlowResult:

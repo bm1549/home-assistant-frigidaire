@@ -13,7 +13,6 @@ from homeassistant.components.climate.const import (
     FAN_HIGH,
     FAN_LOW,
     FAN_MEDIUM,
-    FAN_OFF,
     PRESET_NONE,
     PRESET_SLEEP,
     SWING_OFF,
@@ -45,12 +44,8 @@ def _normalize_enum_value(value):
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up frigidaire from a config entry."""
-    client = hass.data[DOMAIN][entry.entry_id]
-
-    def get_entities(username: str, password: str) -> list[frigidaire.Appliance]:
-        return client.get_appliances()
-
-    appliances = await hass.async_add_executor_job(get_entities, entry.data["username"], entry.data["password"])
+    client = hass.data[DOMAIN][entry.entry_id]["client"]
+    appliances: list[frigidaire.Appliance] = hass.data[DOMAIN][entry.entry_id]["appliances"]
 
     async_add_entities(
         [
@@ -134,7 +129,7 @@ class FrigidaireClimate(ClimateEntity):
 
         self._client: frigidaire.Frigidaire = client
         self._appliance: frigidaire.Appliance = appliance
-        self._details: dict | None = None
+        self._details: dict = {}
 
         # Optimistic state — holds values for OPTIMISTIC_WINDOW seconds after a command
         self._optimistic_until: float = 0
@@ -194,36 +189,6 @@ class FrigidaireClimate(ClimateEntity):
         self._optimistic_swing_mode = None
 
     @property
-    def unique_id(self):
-        """Return unique ID based on Frigidaire ID."""
-        return self._attr_unique_id
-
-    @property
-    def name(self):
-        """Return the name of the entity."""
-        return self._attr_name
-
-    @property
-    def supported_features(self):
-        """Return the list of supported features."""
-        return self._attr_supported_features
-
-    @property
-    def hvac_modes(self):
-        """List of available operation modes."""
-        return self._attr_hvac_modes
-
-    @property
-    def target_temperature_step(self):
-        """Return the supported step of target temperature."""
-        return self._attr_target_temperature_step
-
-    @property
-    def fan_modes(self):
-        """List of available fan modes."""
-        return self._attr_fan_modes
-
-    @property
     def temperature_unit(self):
         """Return the unit of measurement which this thermostat uses."""
         unit = _normalize_enum_value(self._details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION))
@@ -279,9 +244,9 @@ class FrigidaireClimate(ClimateEntity):
         fan_speed = _normalize_enum_value(self._details.get(frigidaire.Detail.FAN_SPEED))
 
         if not fan_speed:
-            return FAN_OFF
+            return None
 
-        return FRIGIDAIRE_TO_HA_FAN_SPEED[fan_speed]
+        return FRIGIDAIRE_TO_HA_FAN_SPEED.get(fan_speed)
 
     @property
     def swing_mode(self) -> str | None:
@@ -381,9 +346,12 @@ class FrigidaireClimate(ClimateEntity):
             if _normalize_enum_value(self._details.get(frigidaire.Detail.MODE)) == frigidaire.Mode.OFF:
                 self._client.execute_action(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
                 # temperature reverts to default when the device is turned on
-                self._client.execute_action(
-                    self._appliance, frigidaire.Action.set_temperature(int(self.target_temperature))
-                )
+                current_temp = self.target_temperature
+                if current_temp is not None:
+                    self._client.execute_action(
+                        self._appliance,
+                        frigidaire.Action.set_temperature(int(current_temp), HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]),
+                    )
             self._client.execute_action(
                 self._appliance, frigidaire.Action.set_mode(HA_TO_FRIGIDAIRE_HVAC_MODE[hvac_mode])
             )

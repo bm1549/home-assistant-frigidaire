@@ -27,8 +27,8 @@ OPTIMISTIC_WINDOW = 5  # seconds to hold optimistic state after a command
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up Frigidaire timer number entities."""
-    client = hass.data[DOMAIN][entry.entry_id]
-    appliances: list[frigidaire.Appliance] = await hass.async_add_executor_job(client.get_appliances)
+    client = hass.data[DOMAIN][entry.entry_id]["client"]
+    appliances: list[frigidaire.Appliance] = hass.data[DOMAIN][entry.entry_id]["appliances"]
 
     entities = [
         FrigidaireTimerNumber(client, appliance, timer_type, suggest_area(hass, appliance.nickname))
@@ -74,7 +74,7 @@ class FrigidaireTimerNumber(NumberEntity):
 
     @property
     def native_value(self) -> float:
-        if self._optimistic_until and time.monotonic() < self._optimistic_until:
+        if time.monotonic() < self._optimistic_until:
             return self._optimistic_value or 0
         if self._details is None:
             return 0

@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import os
-import traceback
 
-from homeassistant import data_entry_flow
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -34,17 +32,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             save_auth(auth_path, client.session_key, client.regional_base_url)
 
-            hass.data[DOMAIN][entry.entry_id] = client
+            appliances = client.get_appliances()
+            hass.data[DOMAIN][entry.entry_id] = {"client": client, "appliances": appliances}
         except ConnectionError as err:
             raise ConfigEntryNotReady("Cannot connect to Frigidaire") from err
         except frigidaire.FrigidaireException as err:
-            # Handle frigidaire 429 gracefully
-            if "cas_3403" in traceback.format_exc():
-                raise data_entry_flow.AbortFlow(
-                    "You have exceeded Frigidaire's maximum number of active sessions. "
-                    "Please log out of another device or wait until an existing session expires."
+            if "cas_3403" in str(err):
+                raise ConfigEntryNotReady(
+                    "Rate limited by Frigidaire. Will retry automatically."
                 ) from err
-            raise data_entry_flow.AbortFlow("Frigidaire backend exception") from err
+            raise ConfigEntryNotReady(f"Frigidaire error during setup: {err}") from err
 
     await hass.async_add_executor_job(setup, entry.data["username"], entry.data["password"])
 
