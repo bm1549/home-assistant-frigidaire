@@ -19,11 +19,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_platform
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 import frigidaire
 
 from .const import DOMAIN
+from .helpers import suggest_area
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,7 +60,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async_add_entities(
         [
-            FrigidaireDehumidifier(client, appliance)
+            FrigidaireDehumidifier(client, appliance, suggest_area(hass, appliance.nickname))
             for appliance in appliances
             if appliance.destination == frigidaire.Destination.DEHUMIDIFIER
         ],
@@ -93,8 +95,8 @@ HA_TO_FRIGIDAIRE_FAN_MODE = {v: k for k, v in FRIGIDAIRE_TO_HA_FAN_MODE.items()}
 class FrigidaireDehumidifier(HumidifierEntity):
     """Representation of a Frigidaire dehumidifier."""
 
-    def __init__(self, client, appliance):
-        """Build FrigidaireClimate.
+    def __init__(self, client, appliance, suggested_area: str | None = None):
+        """Build FrigidaireDehumidifier.
 
         client: the client used to contact the frigidaire API
         appliance: the basic information about the frigidaire appliance, used to contact
@@ -108,6 +110,12 @@ class FrigidaireDehumidifier(HumidifierEntity):
         # Entity Class Attributes
         self._attr_unique_id = self._appliance.appliance_id
         self._attr_name = self._appliance.nickname
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._appliance.appliance_id)},
+            name=self._appliance.nickname,
+            manufacturer="Frigidaire",
+            suggested_area=suggested_area,
+        )
         self._attr_supported_features = HumidifierEntityFeature.MODES
 
         # Although we can access the Frigidaire API to get updates, they are

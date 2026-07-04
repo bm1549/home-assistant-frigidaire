@@ -13,17 +13,21 @@ from homeassistant.components.climate.const import (
     FAN_LOW,
     FAN_MEDIUM,
     FAN_OFF,
+    PRESET_NONE,
+    PRESET_SLEEP,
     ClimateEntityFeature,
     HVACMode,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 import frigidaire
 
 from .const import DOMAIN
+from .helpers import suggest_area
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,7 +50,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async_add_entities(
         [
-            FrigidaireClimate(client, appliance)
+            FrigidaireClimate(client, appliance, suggest_area(hass, appliance.nickname))
             for appliance in appliances
             if appliance.destination == frigidaire.Destination.AIR_CONDITIONER
         ],
@@ -99,7 +103,7 @@ HA_TO_FRIGIDAIRE_HVAC_MODE = {
 class FrigidaireClimate(ClimateEntity):
     """Representation of a Frigidaire appliance."""
 
-    def __init__(self, client, appliance):
+    def __init__(self, client, appliance, suggested_area: str | None = None):
         """Build FrigidaireClimate.
 
         client: the client used to contact the frigidaire API
@@ -114,12 +118,20 @@ class FrigidaireClimate(ClimateEntity):
         # Entity Class Attributes
         self._attr_unique_id = self._appliance.appliance_id
         self._attr_name = self._appliance.nickname
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._appliance.appliance_id)},
+            name=self._appliance.nickname,
+            manufacturer="Frigidaire",
+            suggested_area=suggested_area,
+        )
         self._attr_supported_features = (
             ClimateEntityFeature.TARGET_TEMPERATURE
             | ClimateEntityFeature.FAN_MODE
+            | ClimateEntityFeature.PRESET_MODE
             | ClimateEntityFeature.TURN_OFF
             | ClimateEntityFeature.TURN_ON
         )
+        self._attr_preset_modes = [PRESET_NONE, PRESET_SLEEP]
         self._attr_target_temperature_step = 1
 
         # Although we can access the Frigidaire API to get updates, they are
@@ -236,6 +248,23 @@ class FrigidaireClimate(ClimateEntity):
             return 90
 
         return 32
+
+    @property
+    def preset_mode(self) -> str | None:
+        sleep = _normalize_enum_value(self._details.get(frigidaire.Detail.SLEEP_MODE))
+        if sleep == frigidaire.SleepMode.ON:
+            return PRESET_SLEEP
+        return PRESET_NONE
+
+    def set_preset_mode(self, preset_mode: str) -> None:
+        if preset_mode == PRESET_SLEEP:
+            self._client.execute_action(
+                self._appliance, frigidaire.Action.set_sleep_mode(frigidaire.SleepMode.ON)
+            )
+        else:
+            self._client.execute_action(
+                self._appliance, frigidaire.Action.set_sleep_mode(frigidaire.SleepMode.OFF)
+            )
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:

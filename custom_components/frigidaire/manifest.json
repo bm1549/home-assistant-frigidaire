@@ -1,6 +1,6 @@
 {
   "domain": "frigidaire",
-  "name": "frigidaire",
+  "name": "Frigidaire",
   "codeowners": [
     "@bm1549"
   ],
@@ -12,5 +12,5 @@
   "requirements": [
     "frigidaire==0.18.47"
   ],
-  "version": "0.1.22"
+  "version": "0.2.0"
 }
