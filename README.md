@@ -21,6 +21,8 @@ A Home Assistant integration for Frigidaire WiFi-connected appliances, using the
 - Fan speed: Auto, Low, Medium, High
 - Target temperature control (°F and °C)
 - Preset modes: Sleep
+- Swing modes: Vertical, Off
+- ON/OFF timer control (30-minute increments, up to 24 hours)
 - Extra state attributes: `check_filter`
 
 ### Dehumidifier
@@ -36,7 +38,6 @@ During setup — or at any time via **Configure** — you can enable additional 
 
 | Switch | Description |
 |---|---|
-| Vertical Swing | Toggles the vertical louver oscillation |
 | Ionizer (Clean Air Mode) | Toggles the ionizer/clean air feature |
 | Display Light | Toggles the unit's display panel light |
 | Child Lock | Locks the physical controls on the unit |

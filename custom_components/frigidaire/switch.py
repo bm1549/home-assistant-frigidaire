@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import frigidaire
-from frigidaire import Component, Detail, Setting, VerticalSwing
+from frigidaire import Component, Detail, Setting
 
 from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
 from homeassistant.config_entries import ConfigEntry
@@ -45,15 +45,6 @@ class SwitchDescription:
 SWITCH_DESCRIPTIONS: dict[str, SwitchDescription] = {
     d.key: d
     for d in [
-        SwitchDescription(
-            key="vertical_swing",
-            name="Vertical Swing",
-            detail=Detail.VERTICAL_SWING,
-            setting=Setting.VERTICAL_SWING,
-            on_value=VerticalSwing.ON,
-            off_value=VerticalSwing.OFF,
-            icon="mdi:arrow-oscillating",
-        ),
         SwitchDescription(
             key="clean_air_mode",
             name="Ionizer",

@@ -11,7 +11,6 @@
         "title": "Extra Controls — {device_name}",
         "description": "Select which switch entities to expose for {device_name}. Only enable switches your device supports — unsupported settings will be silently ignored by the appliance.",
         "data": {
-          "vertical_swing": "Vertical Swing",
           "clean_air_mode": "Ionizer (Clean Air Mode)",
           "display_light": "Display Light",
           "ui_lock": "Child Lock"
@@ -33,7 +32,6 @@
         "title": "Extra Controls — {device_name}",
         "description": "Select which switch entities to expose for {device_name}. Only enable switches your device supports — unsupported settings will be silently ignored by the appliance.",
         "data": {
-          "vertical_swing": "Vertical Swing",
           "clean_air_mode": "Ionizer (Clean Air Mode)",
           "display_light": "Display Light",
           "ui_lock": "Child Lock"
