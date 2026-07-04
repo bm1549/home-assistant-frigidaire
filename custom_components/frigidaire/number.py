@@ -91,7 +91,8 @@ class FrigidaireTimerNumber(NumberEntity):
             detail_key = frigidaire.Detail.STOP_TIME
         if not active:
             return 0
-        return max(0, self._details.get(detail_key) or 0)
+        raw = self._details.get(detail_key) or 0
+        return max(0, round(raw / STEP_SECONDS) * STEP_SECONDS)
 
     def set_native_value(self, value: float) -> None:
         seconds = int(round(value / STEP_SECONDS) * STEP_SECONDS)
