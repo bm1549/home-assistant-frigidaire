@@ -121,7 +121,7 @@ class FrigidaireDehumidifier(HumidifierEntity):
         #     FAN_HIGH,
         # ]
 
-        self._attr_modes = [
+        self._attr_available_modes = [
             MODE_NORMAL,
             MODE_BOOST,
             MODE_AUTO,
