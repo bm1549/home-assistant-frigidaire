@@ -185,6 +185,12 @@ class FrigidaireDehumidifier(HumidifierEntity):
             if water_bucket_level == 1:
                 bin_full = True
 
+        # Fallback to waterTankFull if neither alert nor waterBucketLevel is set
+        if not bin_full:
+            water_tank_full = _normalize_enum_value(self._details.get(frigidaire.Detail.WATER_TANK_FULL))
+            if water_tank_full in ("YES", True):
+                bin_full = True
+
         attrib["bin_full"] = bin_full
 
         return attrib
