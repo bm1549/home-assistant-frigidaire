@@ -91,7 +91,7 @@ HA_TO_FRIGIDAIRE_FAN_MODE = {
 }
 
 HA_TO_FRIGIDAIRE_HVAC_MODE = {
-    HVACMode.AUTO: frigidaire.Mode.ECO,
+    HVACMode.AUTO: frigidaire.Mode.AUTO,
     HVACMode.FAN_ONLY: frigidaire.Mode.FAN,
     HVACMode.COOL: frigidaire.Mode.COOL,
     HVACMode.OFF: frigidaire.Mode.OFF,
@@ -221,12 +221,19 @@ class FrigidaireClimate(ClimateEntity):
     @property
     def hvac_action(self) -> HVACAction | None:
         """Return the current HVAC action."""
-        if self.hvac_mode == HVACMode.OFF:
+        mode = self.hvac_mode
+        if mode == HVACMode.OFF:
             return HVACAction.OFF
         appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
-        if appliance_state == frigidaire.ApplianceState.RUNNING:
-            return HVACAction.COOLING
-        return HVACAction.IDLE
+        if appliance_state != frigidaire.ApplianceState.RUNNING:
+            return HVACAction.IDLE
+        # Running — report the action that matches the active mode rather than
+        # collapsing everything to COOLING.
+        if mode == HVACMode.FAN_ONLY:
+            return HVACAction.FAN
+        if mode == HVACMode.DRY:
+            return HVACAction.DRYING
+        return HVACAction.COOLING
 
     @property
     def current_temperature(self):

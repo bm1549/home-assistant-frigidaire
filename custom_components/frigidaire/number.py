@@ -59,7 +59,7 @@ class FrigidaireTimerNumber(NumberEntity):
         self._client = client
         self._appliance = appliance
         self._timer_type = timer_type  # "on" or "off"
-        self._details: dict | None = None
+        self._details: dict = {}
         self._optimistic_until: float = 0
         self._optimistic_value: float | None = None
 
