@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
-
-import frigidaire
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity
 from homeassistant.config_entries import ConfigEntry
@@ -14,6 +11,8 @@ from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+import frigidaire
 
 from .const import DOMAIN
 from .helpers import suggest_area
@@ -26,8 +25,9 @@ def _normalize(value):
         return value.upper()
     return value
 
-STEP_SECONDS = 1800   # 30 minutes
-MAX_SECONDS = 86400   # 24 hours
+
+STEP_SECONDS = 1800  # 30 minutes
+MAX_SECONDS = 86400  # 24 hours
 OPTIMISTIC_WINDOW = 5  # seconds to hold optimistic state after a command
 
 

@@ -6,14 +6,14 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-import frigidaire
-from frigidaire import Component, Detail, Setting
-
-from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
+from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+
+import frigidaire
+from frigidaire import Component, Detail, Setting
 
 from .const import DOMAIN
 from .helpers import suggest_area
@@ -100,7 +100,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 class FrigidaireSwitch(SwitchEntity):
     """A switch for a single Frigidaire boolean setting."""
 
-    def __init__(self, client: frigidaire.Frigidaire, appliance: frigidaire.Appliance, desc: SwitchDescription, suggested_area: str | None = None) -> None:
+    def __init__(
+        self,
+        client: frigidaire.Frigidaire,
+        appliance: frigidaire.Appliance,
+        desc: SwitchDescription,
+        suggested_area: str | None = None,
+    ) -> None:
         self._client = client
         self._appliance = appliance
         self._desc = desc

@@ -61,9 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # ConfigEntryNotReady so HA retries setup automatically rather than
             # aborting — AbortFlow is only valid inside a config flow, not here.
             if "cas_3403" in str(err):
-                raise ConfigEntryNotReady(
-                    "Rate limited by Frigidaire. Will retry automatically."
-                ) from err
+                raise ConfigEntryNotReady("Rate limited by Frigidaire. Will retry automatically.") from err
             raise ConfigEntryNotReady(f"Frigidaire error during setup: {err}") from err
 
     await hass.async_add_executor_job(setup, entry.data["username"], entry.data["password"])

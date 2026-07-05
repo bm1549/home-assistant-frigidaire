@@ -357,7 +357,9 @@ class FrigidaireClimate(ClimateEntity):
                 if current_temp is not None:
                     self._client.execute_action(
                         self._appliance,
-                        frigidaire.Action.set_temperature(int(current_temp), HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]),
+                        frigidaire.Action.set_temperature(
+                            int(current_temp), HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]
+                        ),
                     )
             self._client.execute_action(
                 self._appliance, frigidaire.Action.set_mode(HA_TO_FRIGIDAIRE_HVAC_MODE[hvac_mode])
