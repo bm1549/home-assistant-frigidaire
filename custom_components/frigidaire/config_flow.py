@@ -15,15 +15,17 @@ from homeassistant.exceptions import HomeAssistantError
 import frigidaire
 
 from .auth_store import AUTH_FILE, load_auth, save_auth
-from .const import DOMAIN, SWITCH_OPTIONS
+from .const import BINARY_SENSOR_OPTIONS, DOMAIN, SWITCH_OPTIONS
 
 _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema({"username": str, "password": str})
 
+ALL_OPTIONS = {**SWITCH_OPTIONS, **BINARY_SENSOR_OPTIONS}
 
-def _switches_schema(current: dict) -> vol.Schema:
-    return vol.Schema({vol.Optional(key, default=current.get(key, False)): bool for key in SWITCH_OPTIONS})
+
+def _device_schema(current: dict) -> vol.Schema:
+    return vol.Schema({vol.Optional(key, default=current.get(key, False)): bool for key in ALL_OPTIONS})
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> list[frigidaire.Appliance]:
@@ -115,7 +117,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._pending_appliances.pop(0)
             return await self._async_next_device_step()
 
-        schema = _switches_schema({})
+        schema = _device_schema({})
         return self.async_show_form(
             step_id="device",
             data_schema=schema,
@@ -155,7 +157,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             self._pending_appliances.pop(0)
             return await self._async_next_device_step()
 
-        schema = _switches_schema(current)
+        schema = _device_schema(current)
         return self.async_show_form(
             step_id="device",
             data_schema=schema,

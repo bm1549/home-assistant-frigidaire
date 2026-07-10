@@ -9,11 +9,12 @@
       },
       "device": {
         "title": "Extra Controls — {device_name}",
-        "description": "Select which switch entities to expose for {device_name}. Only enable switches your device supports — unsupported settings will be silently ignored by the appliance.",
+        "description": "Select which entities to expose for {device_name}. Only enable options your device supports — unsupported settings will be silently ignored by the appliance.",
         "data": {
           "clean_air_mode": "Ionizer (Clean Air Mode)",
           "display_light": "Display Light",
-          "ui_lock": "Child Lock"
+          "ui_lock": "Child Lock",
+          "check_filter": "Check Filter"
         }
       }
     },
@@ -31,11 +32,12 @@
     "step": {
       "device": {
         "title": "Extra Controls — {device_name}",
-        "description": "Select which switch entities to expose for {device_name}. Only enable switches your device supports — unsupported settings will be silently ignored by the appliance.",
+        "description": "Select which entities to expose for {device_name}. Only enable options your device supports — unsupported settings will be silently ignored by the appliance.",
         "data": {
           "clean_air_mode": "Ionizer (Clean Air Mode)",
           "display_light": "Display Light",
-          "ui_lock": "Child Lock"
+          "ui_lock": "Child Lock",
+          "check_filter": "Check Filter"
         }
       }
     }

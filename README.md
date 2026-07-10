@@ -23,7 +23,7 @@ A Home Assistant integration for Frigidaire WiFi-connected appliances, using the
 - Preset modes: Sleep
 - Swing modes: Vertical, Off
 - ON/OFF timer control (30-minute increments, up to 24 hours)
-- Extra state attributes: `check_filter`
+- Extra state attributes: `check_filter` (also available as an optional binary sensor)
 
 ### Dehumidifier
 
@@ -32,17 +32,18 @@ A Home Assistant integration for Frigidaire WiFi-connected appliances, using the
 - Fan speed control via the `frigidaire.set_fan_mode` service: `low`, `medium`, `high`
 - Extra state attributes: `current_humidity`, `check_filter`, `fan_mode`, `bin_full`
 
-### Optional Switch Entities
+### Optional Entities
 
-During setup — or at any time via **Configure** — you can enable additional switch entities per device:
+During setup — or at any time via **Configure** — you can enable additional entities per device:
 
-| Switch | Description |
-|---|---|
-| Ionizer (Clean Air Mode) | Toggles the ionizer/clean air feature |
-| Display Light | Toggles the unit's display panel light |
-| Child Lock | Locks the physical controls on the unit |
+| Entity | Type | Description |
+|---|---|---|
+| Ionizer (Clean Air Mode) | Switch | Toggles the ionizer/clean air feature |
+| Display Light | Switch | Toggles the unit's display panel light |
+| Child Lock | Switch | Locks the physical controls on the unit |
+| Check Filter | Binary sensor | On when the filter needs cleaning or replacement |
 
-Each device is configured independently, so a home with both an AC and a dehumidifier can have different switches enabled for each.
+Each device is configured independently, so a home with both an AC and a dehumidifier can have different entities enabled for each.
 
 ## Installing
 
@@ -62,13 +63,13 @@ Each device is configured independently, so a home with both an AC and a dehumid
 4. Go to **Settings → Devices & Services → Add Integration** and search for **Frigidaire**.
 5. Enter your Frigidaire account email and password.
 
-## Reconfiguring Switch Entities
+## Reconfiguring Optional Entities
 
-Go to **Settings → Devices & Services → Frigidaire → Configure** to change which switch entities are enabled for each device.
+Go to **Settings → Devices & Services → Frigidaire → Configure** to change which optional entities are enabled for each device.
 
-## Upgrading from 0.1.x
+## Upgrading from <=0.1.26
 
-The 0.2.0 release introduces device grouping, per-device switch configuration, and sleep mode as a preset on AC entities. After upgrading:
+The 0.1.27 release introduces device grouping, per-device switch configuration, and sleep mode as a preset on AC entities. After upgrading:
 
 1. Copy the new files and restart Home Assistant — your existing climate and dehumidifier entities will continue to work without any reconfiguration.
 2. To enable the new switch entities, go to **Settings → Devices & Services → Frigidaire → Configure** and select the switches you want for each device.

@@ -193,7 +193,7 @@ class FrigidaireClimate(ClimateEntity):
         """Return the unit of measurement which this thermostat uses."""
         unit = _normalize_enum_value(self._details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION))
 
-        return FRIGIDAIRE_TO_HA_UNIT[unit]
+        return FRIGIDAIRE_TO_HA_UNIT.get(unit, UnitOfTemperature.FAHRENHEIT)
 
     @property
     def target_temperature(self):
