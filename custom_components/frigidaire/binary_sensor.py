@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import logging
 
-import frigidaire
-
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import BINARY_SENSOR_OPTIONS, DOMAIN
+import frigidaire
+
+from .const import DOMAIN
 from .helpers import suggest_area
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,7 +47,9 @@ class FrigidaireCheckFilterSensor(BinarySensorEntity):
 
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
 
-    def __init__(self, client: frigidaire.Frigidaire, appliance: frigidaire.Appliance, suggested_area: str | None = None) -> None:
+    def __init__(
+        self, client: frigidaire.Frigidaire, appliance: frigidaire.Appliance, suggested_area: str | None = None
+    ) -> None:
         self._client = client
         self._appliance = appliance
         self._details: dict = {}
