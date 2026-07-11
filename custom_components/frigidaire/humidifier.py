@@ -176,7 +176,7 @@ class FrigidaireDehumidifier(HumidifierEntity):
                 bin_full = True
 
             # 2) New approach
-            if any(isinstance(alert, dict) and alert.get("code") == "BUCKET_FULL" for alert in alerts):
+            if any(alert.get("code") == "BUCKET_FULL" for alert in alerts):
                 bin_full = True
 
         # Fallback to waterBucketLevel if alert is not set
