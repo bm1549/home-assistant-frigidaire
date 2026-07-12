@@ -115,6 +115,20 @@ HA_TO_FRIGIDAIRE_PRESET = {
 
 OPTIMISTIC_WINDOW = 5  # seconds
 
+# Raw reported-detail key for the actual (vs. requested) fan speed. Referenced by
+# string rather than frigidaire.Detail so the integration keeps working on lib
+# versions that predate the FAN_SPEED_STATE enum member.
+FAN_SPEED_STATE_KEY = "fanSpeedState"
+
+# fanSpeedState values that mean the fan (and therefore the compressor) is idle.
+_FAN_STATE_OFF_VALUES = {"OFF", "NONE", "", "0", 0}
+
+# How long the room temperature must stay at/below the setpoint before we treat
+# the compressor as off. Models compressor run-on and avoids flapping near the
+# setpoint. The compressor is reported as cooling again immediately once the
+# room rises back above target.
+COMPRESSOR_OFF_DELAY = 300  # seconds (5 minutes)
+
 
 class FrigidaireClimate(ClimateEntity):
     """Representation of a Frigidaire appliance."""
@@ -138,6 +152,11 @@ class FrigidaireClimate(ClimateEntity):
         self._optimistic_fan_mode: str | None = None
         self._optimistic_preset_mode: str | None = None
         self._optimistic_swing_mode: str | None = None
+
+        # Monotonic timestamp of when the room first reached/dropped below the
+        # setpoint. Used to delay flipping hvac_action to idle; None while the
+        # compressor is considered actively cooling.
+        self._compressor_satisfied_since: float | None = None
 
         # Entity Class Attributes
         self._attr_unique_id = self._appliance.appliance_id
@@ -188,6 +207,61 @@ class FrigidaireClimate(ClimateEntity):
         self._optimistic_preset_mode = None
         self._optimistic_swing_mode = None
 
+    def _is_compressor_running(self) -> bool:
+        """Estimate whether the compressor is actively cooling/drying.
+
+        The Frigidaire API does not expose compressor state directly, so infer
+        it. The compressor runs while the measured room temperature is above the
+        target setpoint. Once the room reaches the setpoint the compressor stops,
+        but not instantly and not on every cycle — so we keep reporting cooling
+        for COMPRESSOR_OFF_DELAY after the temperature first drops to target,
+        then treat it as idle. Cooling is reported again immediately once the
+        room rises back above target.
+
+        A device reporting its fan off (fanSpeedState) is a definitive "not
+        cooling" signal and short-circuits to idle. This is only a supplementary
+        fast path, not a requirement: in COOL mode the fan keeps running after
+        the setpoint is reached, so the temperature estimate below must stand on
+        its own.
+
+        This estimate exists mainly to feed energy-usage calculations, so it errs
+        toward reporting activity when the device gives us nothing to go on.
+        """
+        raw_fan_state = self._details.get(FAN_SPEED_STATE_KEY)
+        if raw_fan_state is not None and _normalize_enum_value(raw_fan_state) in _FAN_STATE_OFF_VALUES:
+            self._compressor_satisfied_since = None
+            return False
+
+        current = self.current_temperature
+        target = self.target_temperature
+        if current is None or target is None:
+            self._compressor_satisfied_since = None
+            return True
+
+        if current > target:
+            # Room still above setpoint: compressor is actively cooling.
+            self._compressor_satisfied_since = None
+            return True
+
+        # Room at/below setpoint: hold "cooling" for COMPRESSOR_OFF_DELAY before
+        # flipping to idle, tracking when the temperature first reached target.
+        now = time.monotonic()
+        if self._compressor_satisfied_since is None:
+            self._compressor_satisfied_since = now
+        return (now - self._compressor_satisfied_since) < COMPRESSOR_OFF_DELAY
+
+    @property
+    def current_fan_speed(self) -> str | None:
+        """Actual running fan speed reported by the device (fanSpeedState).
+
+        Distinct from fan_mode, which reflects the requested setting. Returns
+        None when the device does not report an actual fan-speed state.
+        """
+        raw = self._details.get(FAN_SPEED_STATE_KEY)
+        if raw is None:
+            return None
+        return FRIGIDAIRE_TO_HA_FAN_SPEED.get(_normalize_enum_value(raw), str(raw).lower())
+
     @property
     def temperature_unit(self):
         """Return the unit of measurement which this thermostat uses."""
@@ -222,15 +296,21 @@ class FrigidaireClimate(ClimateEntity):
     def hvac_action(self) -> HVACAction | None:
         """Return the current HVAC action."""
         mode = self.hvac_mode
+        if mode is None:
+            return None
         if mode == HVACMode.OFF:
             return HVACAction.OFF
         appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
-        if appliance_state != frigidaire.ApplianceState.RUNNING:
+        if appliance_state is not None and appliance_state != frigidaire.ApplianceState.RUNNING:
+            # OFF or DELAYED_START — the unit is powered but not conditioning.
             return HVACAction.IDLE
-        # Running — report the action that matches the active mode rather than
-        # collapsing everything to COOLING.
+        # The fan runs whenever the unit is on, but the compressor cycles
+        # independently. Only report cooling/drying while the compressor is
+        # estimated to be running; otherwise the unit is idling (fan-only).
         if mode == HVACMode.FAN_ONLY:
             return HVACAction.FAN
+        if not self._is_compressor_running():
+            return HVACAction.IDLE
         if mode == HVACMode.DRY:
             return HVACAction.DRYING
         return HVACAction.COOLING
@@ -312,9 +392,13 @@ class FrigidaireClimate(ClimateEntity):
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
-        return {
+        attributes: dict[str, Any] = {
             "check_filter": bool(_normalize_enum_value(self._details.get(frigidaire.Detail.FILTER_STATE)) == "CHANGE"),
         }
+        current_fan_speed = self.current_fan_speed
+        if current_fan_speed is not None:
+            attributes["current_fan_speed"] = current_fan_speed
+        return attributes
 
     def set_temperature(self, **kwargs):
         """Set new target temperature."""
