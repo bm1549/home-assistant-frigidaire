@@ -1,7 +1,7 @@
 """Constants for the frigidaire integration."""
 
 DOMAIN = "frigidaire"
-PLATFORMS = ["binary_sensor", "climate", "humidifier", "number", "switch"]
+PLATFORMS = ["binary_sensor", "climate", "humidifier", "number", "sensor", "switch"]
 
 # Keys must match SwitchDescription.key values in switch.py
 SWITCH_OPTIONS: dict[str, str] = {
@@ -30,3 +30,9 @@ DEFAULT_COOL_HYSTERESIS = 0.0
 # Seconds the room must stay below the setpoint band before the compressor is
 # reported off. Models compressor run-on and avoids flapping near the setpoint.
 DEFAULT_COMPRESSOR_OFF_DELAY = 300
+
+# Optional per-air-conditioner diagnostic entities exposed via the options flow:
+# a binary sensor mirroring the estimated compressor (cooling) state and a sensor
+# reporting the actual running fan speed.
+CONF_COMPRESSOR_SENSOR = "compressor"
+CONF_CURRENT_FAN_SPEED_SENSOR = "current_fan_speed"

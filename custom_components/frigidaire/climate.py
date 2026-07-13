@@ -60,6 +60,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     """Set up frigidaire from a config entry."""
     client = hass.data[DOMAIN][entry.entry_id]["client"]
     appliances: list[frigidaire.Appliance] = hass.data[DOMAIN][entry.entry_id]["appliances"]
+    state_store: dict = hass.data[DOMAIN][entry.entry_id].setdefault("climate_state", {})
 
     async_add_entities(
         [
@@ -68,6 +69,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 appliance,
                 suggest_area(hass, appliance.nickname),
                 entry.options.get(appliance.appliance_id, {}),
+                state_store,
             )
             for appliance in appliances
             if appliance.destination == frigidaire.Destination.AIR_CONDITIONER
@@ -146,7 +148,7 @@ _FAN_STATE_OFF_VALUES = {"OFF", "NONE", "", "0", 0}
 class FrigidaireClimate(ClimateEntity):
     """Representation of a Frigidaire appliance."""
 
-    def __init__(self, client, appliance, suggested_area: str | None = None, options: Mapping[str, Any] | None = None):
+    def __init__(self, client, appliance, suggested_area: str | None = None, options: Mapping[str, Any] | None = None, state_store: dict | None = None):
         """Build FrigidaireClimate.
 
         client: the client used to contact the frigidaire API
@@ -154,11 +156,14 @@ class FrigidaireClimate(ClimateEntity):
             the API
         options: per-appliance options from the config entry (compressor-state
             estimation tuning, etc.)
+        state_store: per-entry dict the entity publishes compressor / fan state
+            into for the optional diagnostic sensor entities to read.
         """
 
         self._client: frigidaire.Frigidaire = client
         self._appliance: frigidaire.Appliance = appliance
         self._details: dict = {}
+        self._state_store = state_store
 
         # Compressor-state estimation tuning (configurable via the options flow).
         options = options or {}
@@ -512,3 +517,28 @@ class FrigidaireClimate(ClimateEntity):
 
             if not self._is_optimistic():
                 self._clear_optimistic()
+        finally:
+            self._publish_shared_state()
+
+    def _publish_shared_state(self) -> None:
+        """Publish compressor / fan state for the optional diagnostic entities.
+
+        The compressor binary_sensor and current-fan-speed sensor read from this
+        shared store so they stay consistent with hvac_action and do not make
+        their own API calls.
+        """
+        if self._state_store is None:
+            return
+        if not self._attr_available:
+            self._state_store[self._appliance.appliance_id] = {
+                "available": False,
+                "compressor_running": None,
+                "current_fan_speed": None,
+            }
+            return
+        action = self.hvac_action
+        self._state_store[self._appliance.appliance_id] = {
+            "available": True,
+            "compressor_running": None if action is None else action in (HVACAction.COOLING, HVACAction.DRYING),
+            "current_fan_speed": self.current_fan_speed,
+        }

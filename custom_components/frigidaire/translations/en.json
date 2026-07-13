@@ -38,6 +38,8 @@
                     "display_light": "Display Light",
                     "ui_lock": "Child Lock",
                     "check_filter": "Check Filter",
+                    "compressor": "Compressor status (running)",
+                    "current_fan_speed": "Current fan speed",
                     "cool_hysteresis": "Cooling hysteresis (degrees)",
                     "compressor_off_delay": "Compressor off delay (seconds)"
                 },

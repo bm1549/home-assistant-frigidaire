@@ -18,7 +18,9 @@ from .auth_store import AUTH_FILE, load_auth, save_auth
 from .const import (
     BINARY_SENSOR_OPTIONS,
     CONF_COMPRESSOR_OFF_DELAY,
+    CONF_COMPRESSOR_SENSOR,
     CONF_COOL_HYSTERESIS,
+    CONF_CURRENT_FAN_SPEED_SENSOR,
     DEFAULT_COMPRESSOR_OFF_DELAY,
     DEFAULT_COOL_HYSTERESIS,
     DOMAIN,
@@ -42,6 +44,10 @@ def _device_schema(current: dict, appliance: frigidaire.Appliance | None = None)
     fields: dict = {vol.Optional(key, default=current.get(key, False)): bool for key in ALL_OPTIONS}
 
     if appliance is not None and appliance.destination == frigidaire.Destination.AIR_CONDITIONER:
+        fields[vol.Optional(CONF_COMPRESSOR_SENSOR, default=current.get(CONF_COMPRESSOR_SENSOR, False))] = bool
+        fields[
+            vol.Optional(CONF_CURRENT_FAN_SPEED_SENSOR, default=current.get(CONF_CURRENT_FAN_SPEED_SENSOR, False))
+        ] = bool
         fields[
             vol.Optional(
                 CONF_COOL_HYSTERESIS,

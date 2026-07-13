@@ -53,7 +53,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # (climate, humidifier, number, switch) instead of each calling the
             # API separately.
             appliances = client.get_appliances()
-            hass.data[DOMAIN][entry.entry_id] = {"client": client, "appliances": appliances}
+            hass.data[DOMAIN][entry.entry_id] = {
+                "client": client,
+                "appliances": appliances,
+                # Per-appliance state published by the climate entity and read by
+                # the compressor binary_sensor and current-fan-speed sensor so
+                # they stay consistent with hvac_action without extra API calls.
+                "climate_state": {},
+            }
         except ConnectionError as err:
             raise ConfigEntryNotReady("Cannot connect to Frigidaire") from err
         except frigidaire.FrigidaireException as err:
