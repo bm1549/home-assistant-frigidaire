@@ -14,3 +14,19 @@ SWITCH_OPTIONS: dict[str, str] = {
 BINARY_SENSOR_OPTIONS: dict[str, str] = {
     "check_filter": "Check Filter",
 }
+
+# Climate compressor-state estimation options. Set per air-conditioner appliance
+# via the integration's Configure (options) flow and consumed by climate.py when
+# inferring hvac_action.
+CONF_COOL_HYSTERESIS = "cool_hysteresis"
+CONF_COMPRESSOR_OFF_DELAY = "compressor_off_delay"
+
+# Degrees (in the device's display unit) of deadband around the setpoint used
+# when estimating compressor state. The compressor is reported cooling above
+# target + hysteresis and idle below target - hysteresis; inside the band the
+# last estimate is held. 0 disables the deadband.
+DEFAULT_COOL_HYSTERESIS = 0.0
+
+# Seconds the room must stay below the setpoint band before the compressor is
+# reported off. Models compressor run-on and avoids flapping near the setpoint.
+DEFAULT_COMPRESSOR_OFF_DELAY = 300

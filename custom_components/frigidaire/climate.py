@@ -29,7 +29,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 import frigidaire
 
-from .const import DOMAIN
+from .const import (
+    CONF_COMPRESSOR_OFF_DELAY,
+    CONF_COOL_HYSTERESIS,
+    DEFAULT_COMPRESSOR_OFF_DELAY,
+    DEFAULT_COOL_HYSTERESIS,
+    DOMAIN,
+)
 from .helpers import suggest_area
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,6 +48,14 @@ def _normalize_enum_value(value):
     return value
 
 
+def _coerce_float(value, default) -> float:
+    """Coerce an option value to float, falling back to default on bad input."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up frigidaire from a config entry."""
     client = hass.data[DOMAIN][entry.entry_id]["client"]
@@ -49,7 +63,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async_add_entities(
         [
-            FrigidaireClimate(client, appliance, suggest_area(hass, appliance.nickname))
+            FrigidaireClimate(
+                client,
+                appliance,
+                suggest_area(hass, appliance.nickname),
+                entry.options.get(appliance.appliance_id, {}),
+            )
             for appliance in appliances
             if appliance.destination == frigidaire.Destination.AIR_CONDITIONER
         ],
@@ -123,27 +142,30 @@ FAN_SPEED_STATE_KEY = "fanSpeedState"
 # fanSpeedState values that mean the fan (and therefore the compressor) is idle.
 _FAN_STATE_OFF_VALUES = {"OFF", "NONE", "", "0", 0}
 
-# How long the room temperature must stay at/below the setpoint before we treat
-# the compressor as off. Models compressor run-on and avoids flapping near the
-# setpoint. The compressor is reported as cooling again immediately once the
-# room rises back above target.
-COMPRESSOR_OFF_DELAY = 300  # seconds (5 minutes)
-
 
 class FrigidaireClimate(ClimateEntity):
     """Representation of a Frigidaire appliance."""
 
-    def __init__(self, client, appliance, suggested_area: str | None = None):
+    def __init__(self, client, appliance, suggested_area: str | None = None, options: Mapping[str, Any] | None = None):
         """Build FrigidaireClimate.
 
         client: the client used to contact the frigidaire API
         appliance: the basic information about the frigidaire appliance, used to contact
             the API
+        options: per-appliance options from the config entry (compressor-state
+            estimation tuning, etc.)
         """
 
         self._client: frigidaire.Frigidaire = client
         self._appliance: frigidaire.Appliance = appliance
         self._details: dict = {}
+
+        # Compressor-state estimation tuning (configurable via the options flow).
+        options = options or {}
+        self._cool_hysteresis = _coerce_float(options.get(CONF_COOL_HYSTERESIS), DEFAULT_COOL_HYSTERESIS)
+        self._compressor_off_delay = _coerce_float(
+            options.get(CONF_COMPRESSOR_OFF_DELAY), DEFAULT_COMPRESSOR_OFF_DELAY
+        )
 
         # Optimistic state — holds values for OPTIMISTIC_WINDOW seconds after a command
         self._optimistic_until: float = 0
@@ -153,10 +175,11 @@ class FrigidaireClimate(ClimateEntity):
         self._optimistic_preset_mode: str | None = None
         self._optimistic_swing_mode: str | None = None
 
-        # Monotonic timestamp of when the room first reached/dropped below the
-        # setpoint. Used to delay flipping hvac_action to idle; None while the
-        # compressor is considered actively cooling.
+        # Monotonic timestamp of when the room first dropped below the setpoint
+        # band, and the last estimated compressor state. Used to delay flipping
+        # hvac_action to idle and to hold state inside the hysteresis deadband.
         self._compressor_satisfied_since: float | None = None
+        self._compressor_estimate: bool = True
 
         # Entity Class Attributes
         self._attr_unique_id = self._appliance.appliance_id
@@ -211,12 +234,17 @@ class FrigidaireClimate(ClimateEntity):
         """Estimate whether the compressor is actively cooling/drying.
 
         The Frigidaire API does not expose compressor state directly, so infer
-        it. The compressor runs while the measured room temperature is above the
-        target setpoint. Once the room reaches the setpoint the compressor stops,
-        but not instantly and not on every cycle — so we keep reporting cooling
-        for COMPRESSOR_OFF_DELAY after the temperature first drops to target,
-        then treat it as idle. Cooling is reported again immediately once the
-        room rises back above target.
+        it. A window / room AC only runs the compressor while the room is above
+        the target setpoint. Two configurable knobs shape the estimate:
+
+        - cool_hysteresis: a deadband (in the device's temperature unit) around
+          the setpoint. The compressor is reported cooling above
+          target + hysteresis and idle below target - hysteresis; inside the
+          band the previous estimate is held, which prevents flapping when the
+          room hovers around the setpoint.
+        - compressor_off_delay: how long the room must stay below the band before
+          we flip to idle, modelling compressor run-on. Cooling is reported again
+          immediately once the room rises back above the band.
 
         A device reporting its fan off (fanSpeedState) is a definitive "not
         cooling" signal and short-circuits to idle. This is only a supplementary
@@ -230,25 +258,36 @@ class FrigidaireClimate(ClimateEntity):
         raw_fan_state = self._details.get(FAN_SPEED_STATE_KEY)
         if raw_fan_state is not None and _normalize_enum_value(raw_fan_state) in _FAN_STATE_OFF_VALUES:
             self._compressor_satisfied_since = None
+            self._compressor_estimate = False
             return False
 
         current = self.current_temperature
         target = self.target_temperature
         if current is None or target is None:
             self._compressor_satisfied_since = None
-            return True
+            return self._compressor_estimate
 
-        if current > target:
-            # Room still above setpoint: compressor is actively cooling.
+        hysteresis = self._cool_hysteresis
+        if current > target + hysteresis:
+            # Clearly above the setpoint band: compressor is actively cooling.
             self._compressor_satisfied_since = None
+            self._compressor_estimate = True
             return True
 
-        # Room at/below setpoint: hold "cooling" for COMPRESSOR_OFF_DELAY before
-        # flipping to idle, tracking when the temperature first reached target.
-        now = time.monotonic()
-        if self._compressor_satisfied_since is None:
-            self._compressor_satisfied_since = now
-        return (now - self._compressor_satisfied_since) < COMPRESSOR_OFF_DELAY
+        if current <= target - hysteresis:
+            # Clearly satisfied: hold "cooling" for compressor_off_delay before
+            # flipping to idle, tracking when the room first dropped below.
+            now = time.monotonic()
+            if self._compressor_satisfied_since is None:
+                self._compressor_satisfied_since = now
+            if (now - self._compressor_satisfied_since) >= self._compressor_off_delay:
+                self._compressor_estimate = False
+            return self._compressor_estimate
+
+        # Inside the hysteresis deadband: hold the last estimate and don't let the
+        # off-delay advance (it requires continuous time below the band).
+        self._compressor_satisfied_since = None
+        return self._compressor_estimate
 
     @property
     def current_fan_speed(self) -> str | None:
