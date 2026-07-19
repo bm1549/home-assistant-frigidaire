@@ -41,9 +41,14 @@ During setup — or at any time via **Configure** — you can enable additional 
 | Ionizer (Clean Air Mode) | Switch | Toggles the ionizer/clean air feature |
 | Display Light | Switch | Toggles the unit's display panel light |
 | Child Lock | Switch | Locks the physical controls on the unit |
-| Check Filter | Binary sensor | On when the filter needs cleaning or replacement |
+| Check Filter | Problem binary sensor | On for `CLEAN`, `CHANGE`, or `BUY`; exposes `filter_state` for notification automations |
+| Filter Runtime | Duration sensor | Cumulative filter runtime reported by the appliance, in hours |
+| Active Alerts | Problem binary sensor | On while fault codes are active; exposes them in `active_alerts` |
+| Compressor | Running binary sensor | Estimated compressor state for air conditioners |
+| Current Fan Speed | Sensor | Actual running fan speed reported by an air conditioner |
 
 Each device is configured independently, so a home with both an AC and a dehumidifier can have different entities enabled for each.
+The optional diagnostic entities reuse the appliance platform's normal cloud response and do not add API polling.
 
 ## Installing
 

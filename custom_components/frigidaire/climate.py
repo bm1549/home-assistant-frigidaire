@@ -36,6 +36,12 @@ from .const import (
     DEFAULT_COOL_HYSTERESIS,
     DOMAIN,
 )
+from .diagnostics import (
+    AIR_FILTER_LIFETIME_KEY,
+    filter_needs_attention,
+    normalize_alerts,
+    normalize_filter_state,
+)
 from .helpers import suggest_area
 
 _LOGGER = logging.getLogger(__name__)
@@ -148,7 +154,14 @@ _FAN_STATE_OFF_VALUES = {"OFF", "NONE", "", "0", 0}
 class FrigidaireClimate(ClimateEntity):
     """Representation of a Frigidaire appliance."""
 
-    def __init__(self, client, appliance, suggested_area: str | None = None, options: Mapping[str, Any] | None = None, state_store: dict | None = None):
+    def __init__(
+        self,
+        client,
+        appliance,
+        suggested_area: str | None = None,
+        options: Mapping[str, Any] | None = None,
+        state_store: dict | None = None,
+    ):
         """Build FrigidaireClimate.
 
         client: the client used to contact the frigidaire API
@@ -437,7 +450,7 @@ class FrigidaireClimate(ClimateEntity):
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
         attributes: dict[str, Any] = {
-            "check_filter": bool(_normalize_enum_value(self._details.get(frigidaire.Detail.FILTER_STATE)) == "CHANGE"),
+            "check_filter": filter_needs_attention(self._details.get(frigidaire.Detail.FILTER_STATE)) or False,
         }
         current_fan_speed = self.current_fan_speed
         if current_fan_speed is not None:
@@ -521,24 +534,29 @@ class FrigidaireClimate(ClimateEntity):
             self._publish_shared_state()
 
     def _publish_shared_state(self) -> None:
-        """Publish compressor / fan state for the optional diagnostic entities.
+        """Publish state for the optional diagnostic entities.
 
-        The compressor binary_sensor and current-fan-speed sensor read from this
-        shared store so they stay consistent with hvac_action and do not make
-        their own API calls.
+        Optional entities read this store so they remain synchronized with the
+        climate entity without making their own API calls.
         """
         if self._state_store is None:
             return
         if not self._attr_available:
             self._state_store[self._appliance.appliance_id] = {
                 "available": False,
+                "active_alerts": None,
                 "compressor_running": None,
                 "current_fan_speed": None,
+                "filter_runtime": None,
+                "filter_state": None,
             }
             return
         action = self.hvac_action
         self._state_store[self._appliance.appliance_id] = {
             "available": True,
+            "active_alerts": normalize_alerts(self._details.get(frigidaire.Detail.ALERTS)),
             "compressor_running": None if action is None else action in (HVACAction.COOLING, HVACAction.DRYING),
             "current_fan_speed": self.current_fan_speed,
+            "filter_runtime": self._details.get(AIR_FILTER_LIFETIME_KEY),
+            "filter_state": normalize_filter_state(self._details.get(frigidaire.Detail.FILTER_STATE)),
         }

@@ -10,9 +10,18 @@ SWITCH_OPTIONS: dict[str, str] = {
     "ui_lock": "Child Lock",
 }
 
-# Keys must match binary sensor keys in binary_sensor.py
+# Keys must match diagnostic entity keys.
+CONF_ACTIVE_ALERTS_SENSOR = "active_alerts"
+CONF_CHECK_FILTER_SENSOR = "check_filter"
+CONF_FILTER_RUNTIME_SENSOR = "filter_runtime"
+
 BINARY_SENSOR_OPTIONS: dict[str, str] = {
-    "check_filter": "Check Filter",
+    CONF_ACTIVE_ALERTS_SENSOR: "Active Alerts",
+    CONF_CHECK_FILTER_SENSOR: "Check Filter",
+}
+
+SENSOR_OPTIONS: dict[str, str] = {
+    CONF_FILTER_RUNTIME_SENSOR: "Filter Runtime",
 }
 
 # Climate compressor-state estimation options. Set per air-conditioner appliance
@@ -31,8 +40,6 @@ DEFAULT_COOL_HYSTERESIS = 0.0
 # reported off. Models compressor run-on and avoids flapping near the setpoint.
 DEFAULT_COMPRESSOR_OFF_DELAY = 300
 
-# Optional per-air-conditioner diagnostic entities exposed via the options flow:
-# a binary sensor mirroring the estimated compressor (cooling) state and a sensor
-# reporting the actual running fan speed.
+# Optional air-conditioner diagnostic entities exposed via the options flow.
 CONF_COMPRESSOR_SENSOR = "compressor"
 CONF_CURRENT_FAN_SPEED_SENSOR = "current_fan_speed"

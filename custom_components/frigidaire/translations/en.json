@@ -23,7 +23,20 @@
                     "clean_air_mode": "Ionizer (Clean Air Mode)",
                     "display_light": "Display Light",
                     "ui_lock": "Child Lock",
-                    "check_filter": "Check Filter"
+                    "check_filter": "Check Filter",
+                    "filter_runtime": "Filter runtime",
+                    "active_alerts": "Active alerts",
+                    "compressor": "Compressor status (running)",
+                    "current_fan_speed": "Current fan speed",
+                    "cool_hysteresis": "Cooling hysteresis (degrees)",
+                    "compressor_off_delay": "Compressor off delay (seconds)"
+                },
+                "data_description": {
+                    "check_filter": "Problem sensor that turns on when the filter state is CLEAN, CHANGE, or BUY. Use it to trigger filter-maintenance notifications.",
+                    "filter_runtime": "Cumulative air-filter runtime reported by the appliance, exposed in hours.",
+                    "active_alerts": "Problem sensor that turns on when the appliance reports one or more active fault codes.",
+                    "cool_hysteresis": "Temperature deadband around the setpoint used when estimating whether the compressor is running (drives the cooling/idle status). 0 disables the deadband.",
+                    "compressor_off_delay": "How long the room must stay below the setpoint before the status flips from cooling to idle. Models compressor run-on and avoids flapping near the setpoint."
                 }
             }
         }
@@ -38,12 +51,17 @@
                     "display_light": "Display Light",
                     "ui_lock": "Child Lock",
                     "check_filter": "Check Filter",
+                    "filter_runtime": "Filter runtime",
+                    "active_alerts": "Active alerts",
                     "compressor": "Compressor status (running)",
                     "current_fan_speed": "Current fan speed",
                     "cool_hysteresis": "Cooling hysteresis (degrees)",
                     "compressor_off_delay": "Compressor off delay (seconds)"
                 },
                 "data_description": {
+                    "check_filter": "Problem sensor that turns on when the filter state is CLEAN, CHANGE, or BUY. Use it to trigger filter-maintenance notifications.",
+                    "filter_runtime": "Cumulative air-filter runtime reported by the appliance, exposed in hours.",
+                    "active_alerts": "Problem sensor that turns on when the appliance reports one or more active fault codes.",
                     "cool_hysteresis": "Temperature deadband around the setpoint used when estimating whether the compressor is running (drives the cooling/idle status). 0 disables the deadband.",
                     "compressor_off_delay": "How long the room must stay below the setpoint before the status flips from cooling to idle. Models compressor run-on and avoids flapping near the setpoint."
                 }

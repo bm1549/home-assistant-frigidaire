@@ -25,6 +25,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 import frigidaire
 
 from .const import DOMAIN
+from .diagnostics import (
+    AIR_FILTER_LIFETIME_KEY,
+    filter_needs_attention,
+    normalize_alerts,
+    normalize_filter_state,
+)
 from .helpers import suggest_area
 
 _LOGGER = logging.getLogger(__name__)
@@ -53,10 +59,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     client = hass.data[DOMAIN][entry.entry_id]["client"]
     appliances: list[frigidaire.Appliance] = hass.data[DOMAIN][entry.entry_id]["appliances"]
+    state_store: dict = hass.data[DOMAIN][entry.entry_id].setdefault("climate_state", {})
 
     async_add_entities(
         [
-            FrigidaireDehumidifier(client, appliance, suggest_area(hass, appliance.nickname))
+            FrigidaireDehumidifier(client, appliance, suggest_area(hass, appliance.nickname), state_store)
             for appliance in appliances
             if appliance.destination == frigidaire.Destination.DEHUMIDIFIER
         ],
@@ -91,7 +98,13 @@ HA_TO_FRIGIDAIRE_FAN_MODE = {v: k for k, v in FRIGIDAIRE_TO_HA_FAN_MODE.items()}
 class FrigidaireDehumidifier(HumidifierEntity):
     """Representation of a Frigidaire dehumidifier."""
 
-    def __init__(self, client, appliance, suggested_area: str | None = None):
+    def __init__(
+        self,
+        client,
+        appliance,
+        suggested_area: str | None = None,
+        state_store: dict | None = None,
+    ):
         """Build FrigidaireDehumidifier.
 
         client: the client used to contact the frigidaire API
@@ -102,6 +115,7 @@ class FrigidaireDehumidifier(HumidifierEntity):
         self._client: frigidaire.Frigidaire = client
         self._appliance: frigidaire.Appliance = appliance
         self._details: dict = {}
+        self._state_store = state_store
 
         # Entity Class Attributes
         self._attr_unique_id = self._appliance.appliance_id
@@ -161,23 +175,15 @@ class FrigidaireDehumidifier(HumidifierEntity):
 
         attrib = {
             "current_humidity": self._details.get(frigidaire.Detail.SENSOR_HUMIDITY),
-            "check_filter": bool(
-                _normalize_enum_value(self._details.get(frigidaire.Detail.FILTER_STATE)) != frigidaire.FilterState.GOOD
-            ),
+            "check_filter": filter_needs_attention(self._details.get(frigidaire.Detail.FILTER_STATE)) or False,
             "fan_mode": FRIGIDAIRE_TO_HA_FAN_MODE.get(fan_speed),
         }
 
         # The following attributes only exist on some models of dehumidifier
         bin_full = False
-        alerts = self._details.get(frigidaire.Detail.ALERTS)
+        alerts = normalize_alerts(self._details.get(frigidaire.Detail.ALERTS))
         if alerts is not None:
-            # 1) Old approach
-            if frigidaire.Alert.BUCKET_FULL in alerts:
-                bin_full = True
-
-            # 2) New approach
-            if any(alert.get("code") == "BUCKET_FULL" for alert in alerts):
-                bin_full = True
+            bin_full = "BUCKET_FULL" in alerts
 
         # Fallback to waterBucketLevel if alert is not set
         if not bin_full:
@@ -260,3 +266,24 @@ class FrigidaireDehumidifier(HumidifierEntity):
             appliance_state = self._details.get(frigidaire.Detail.APPLIANCE_STATE)
             mode = self._details.get(frigidaire.Detail.MODE)
             self._attr_available = appliance_state is not None or mode is not None
+        finally:
+            self._publish_shared_state()
+
+    def _publish_shared_state(self) -> None:
+        """Publish diagnostics for optional entities without another API call."""
+        if self._state_store is None:
+            return
+        if not self._attr_available:
+            self._state_store[self._appliance.appliance_id] = {
+                "available": False,
+                "active_alerts": None,
+                "filter_runtime": None,
+                "filter_state": None,
+            }
+            return
+        self._state_store[self._appliance.appliance_id] = {
+            "available": True,
+            "active_alerts": normalize_alerts(self._details.get(frigidaire.Detail.ALERTS)),
+            "filter_runtime": self._details.get(AIR_FILTER_LIFETIME_KEY),
+            "filter_state": normalize_filter_state(self._details.get(frigidaire.Detail.FILTER_STATE)),
+        }

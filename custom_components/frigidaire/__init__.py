@@ -56,9 +56,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data[DOMAIN][entry.entry_id] = {
                 "client": client,
                 "appliances": appliances,
-                # Per-appliance state published by the climate entity and read by
-                # the compressor binary_sensor and current-fan-speed sensor so
-                # they stay consistent with hvac_action without extra API calls.
+                # Per-appliance state published by the owning climate/humidifier
+                # entity and read by optional diagnostics without extra API calls.
                 "climate_state": {},
             }
         except ConnectionError as err:
