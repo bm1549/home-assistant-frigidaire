@@ -430,6 +430,8 @@ class FrigidaireClimate(ClimateEntity):
         reported_fan_speed = self.reported_fan_speed
         if reported_fan_speed is not None:
             attributes["reported_fan_speed"] = reported_fan_speed
+            # Keep the original attribute for existing dashboards and templates.
+            attributes["current_fan_speed"] = reported_fan_speed
         return attributes
 
     def set_temperature(self, **kwargs):
