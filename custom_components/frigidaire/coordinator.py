@@ -44,9 +44,7 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
     async def _async_update_data(self) -> dict:
         """Fetch the latest appliance details, backing off on repeated failures."""
         try:
-            details = await self.hass.async_add_executor_job(
-                self.client.get_appliance_details, self.appliance
-            )
+            details = await self.hass.async_add_executor_job(self.client.get_appliance_details, self.appliance)
         except (frigidaire.FrigidaireException, ConnectionError) as err:
             self._failure_count += 1
             # 30s, 60s, 120s, 240s … capped at MAX_INTERVAL.

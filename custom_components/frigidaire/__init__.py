@@ -65,9 +65,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 raise ConfigEntryNotReady("Rate limited by Frigidaire. Will retry automatically.") from err
             raise ConfigEntryNotReady(f"Frigidaire error during setup: {err}") from err
 
-    client, appliances = await hass.async_add_executor_job(
-        setup, entry.data["username"], entry.data["password"]
-    )
+    client, appliances = await hass.async_add_executor_job(setup, entry.data["username"], entry.data["password"])
 
     # One coordinator per appliance consolidates polling: every entity for a
     # device reads from a single shared fetch instead of hitting the API on its
