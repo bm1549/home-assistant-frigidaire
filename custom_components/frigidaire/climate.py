@@ -29,6 +29,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 import frigidaire
 
+from .compressor import estimate_compressor_running
 from .const import (
     CONF_COMPRESSOR_OFF_DELAY,
     CONF_COOL_HYSTERESIS,
@@ -142,13 +143,10 @@ HA_TO_FRIGIDAIRE_PRESET = {
 
 OPTIMISTIC_WINDOW = 5  # seconds
 
-# Raw reported-detail key for the actual (vs. requested) fan speed. Referenced by
-# string rather than frigidaire.Detail so the integration keeps working on lib
-# versions that predate the FAN_SPEED_STATE enum member.
+# Raw reported fan-speed state. It can resolve AUTO to a concrete level, but it
+# persists while the appliance is off and is not physical running telemetry.
+# Keep the raw key for library versions predating FAN_SPEED_STATE.
 FAN_SPEED_STATE_KEY = "fanSpeedState"
-
-# fanSpeedState values that mean the fan (and therefore the compressor) is idle.
-_FAN_STATE_OFF_VALUES = {"OFF", "NONE", "", "0", 0}
 
 
 class FrigidaireClimate(ClimateEntity):
@@ -264,55 +262,32 @@ class FrigidaireClimate(ClimateEntity):
           we flip to idle, modelling compressor run-on. Cooling is reported again
           immediately once the room rises back above the band.
 
-        A device reporting its fan off (fanSpeedState) is a definitive "not
-        cooling" signal and short-circuits to idle. This is only a supplementary
-        fast path, not a requirement: in COOL mode the fan keeps running after
-        the setpoint is reached, so the temperature estimate below must stand on
-        its own.
+        fanSpeedState is deliberately excluded: live devices retain that value
+        while powered off, so it is not evidence that the fan or compressor is
+        physically running.
 
         This estimate exists mainly to feed energy-usage calculations, so it errs
         toward reporting activity when the device gives us nothing to go on.
         """
-        raw_fan_state = self._details.get(FAN_SPEED_STATE_KEY)
-        if raw_fan_state is not None and _normalize_enum_value(raw_fan_state) in _FAN_STATE_OFF_VALUES:
-            self._compressor_satisfied_since = None
-            self._compressor_estimate = False
-            return False
-
         current = self.current_temperature
         target = self.target_temperature
-        if current is None or target is None:
-            self._compressor_satisfied_since = None
-            return self._compressor_estimate
-
-        hysteresis = self._cool_hysteresis
-        if current > target + hysteresis:
-            # Clearly above the setpoint band: compressor is actively cooling.
-            self._compressor_satisfied_since = None
-            self._compressor_estimate = True
-            return True
-
-        if current <= target - hysteresis:
-            # Clearly satisfied: hold "cooling" for compressor_off_delay before
-            # flipping to idle, tracking when the room first dropped below.
-            now = time.monotonic()
-            if self._compressor_satisfied_since is None:
-                self._compressor_satisfied_since = now
-            if (now - self._compressor_satisfied_since) >= self._compressor_off_delay:
-                self._compressor_estimate = False
-            return self._compressor_estimate
-
-        # Inside the hysteresis deadband: hold the last estimate and don't let the
-        # off-delay advance (it requires continuous time below the band).
-        self._compressor_satisfied_since = None
+        self._compressor_estimate, self._compressor_satisfied_since = estimate_compressor_running(
+            current,
+            target,
+            hysteresis=self._cool_hysteresis,
+            off_delay=self._compressor_off_delay,
+            previous=self._compressor_estimate,
+            satisfied_since=self._compressor_satisfied_since,
+            now=time.monotonic(),
+        )
         return self._compressor_estimate
 
     @property
-    def current_fan_speed(self) -> str | None:
-        """Actual running fan speed reported by the device (fanSpeedState).
+    def reported_fan_speed(self) -> str | None:
+        """Return the appliance's reported fan-speed state.
 
-        Distinct from fan_mode, which reflects the requested setting. Returns
-        None when the device does not report an actual fan-speed state.
+        This can resolve an AUTO setting to a concrete level, but it may retain
+        the last value while the appliance is off and is not running telemetry.
         """
         raw = self._details.get(FAN_SPEED_STATE_KEY)
         if raw is None:
@@ -452,9 +427,9 @@ class FrigidaireClimate(ClimateEntity):
         attributes: dict[str, Any] = {
             "check_filter": filter_needs_attention(self._details.get(frigidaire.Detail.FILTER_STATE)) or False,
         }
-        current_fan_speed = self.current_fan_speed
-        if current_fan_speed is not None:
-            attributes["current_fan_speed"] = current_fan_speed
+        reported_fan_speed = self.reported_fan_speed
+        if reported_fan_speed is not None:
+            attributes["reported_fan_speed"] = reported_fan_speed
         return attributes
 
     def set_temperature(self, **kwargs):
@@ -546,7 +521,7 @@ class FrigidaireClimate(ClimateEntity):
                 "available": False,
                 "active_alerts": None,
                 "compressor_running": None,
-                "current_fan_speed": None,
+                "reported_fan_speed": None,
                 "filter_runtime": None,
                 "filter_state": None,
             }
@@ -556,7 +531,7 @@ class FrigidaireClimate(ClimateEntity):
             "available": True,
             "active_alerts": normalize_alerts(self._details.get(frigidaire.Detail.ALERTS)),
             "compressor_running": None if action is None else action in (HVACAction.COOLING, HVACAction.DRYING),
-            "current_fan_speed": self.current_fan_speed,
+            "reported_fan_speed": self.reported_fan_speed,
             "filter_runtime": self._details.get(AIR_FILTER_LIFETIME_KEY),
             "filter_state": normalize_filter_state(self._details.get(frigidaire.Detail.FILTER_STATE)),
         }

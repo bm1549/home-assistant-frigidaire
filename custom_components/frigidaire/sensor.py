@@ -31,7 +31,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         return
 
     entities: list[SensorEntity] = [
-        FrigidaireCurrentFanSpeedSensor(appliance, state_store, suggest_area(hass, appliance.nickname))
+        FrigidaireReportedFanSpeedSensor(appliance, state_store, suggest_area(hass, appliance.nickname))
         for appliance in appliances
         if appliance.destination == frigidaire.Destination.AIR_CONDITIONER
         and options.get(appliance.appliance_id, {}).get(CONF_CURRENT_FAN_SPEED_SENSOR, False)
@@ -45,8 +45,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async_add_entities(entities, update_before_add=True)
 
 
-class FrigidaireCurrentFanSpeedSensor(SensorEntity):
-    """Reports the actual running fan speed published by the climate entity."""
+class FrigidaireReportedFanSpeedSensor(SensorEntity):
+    """Report the appliance's fan-speed state without implying physical motion."""
 
     _attr_icon = "mdi:fan"
 
@@ -55,8 +55,9 @@ class FrigidaireCurrentFanSpeedSensor(SensorEntity):
     ) -> None:
         self._appliance = appliance
         self._state_store = state_store
+        # Preserve the established unique ID so existing entity history remains intact.
         self._attr_unique_id = f"{appliance.appliance_id}_current_fan_speed"
-        self._attr_name = "Current Fan Speed"
+        self._attr_name = "Reported Fan Speed"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, appliance.appliance_id)},
             name=appliance.nickname,
@@ -71,7 +72,7 @@ class FrigidaireCurrentFanSpeedSensor(SensorEntity):
             self._attr_native_value = None
             return
         self._attr_available = bool(data.get("available"))
-        self._attr_native_value = data.get("current_fan_speed")
+        self._attr_native_value = data.get("reported_fan_speed")
 
 
 class FrigidaireFilterRuntimeSensor(SensorEntity):

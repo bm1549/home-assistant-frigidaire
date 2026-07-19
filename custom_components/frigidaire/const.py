@@ -40,6 +40,7 @@ DEFAULT_COOL_HYSTERESIS = 0.0
 # reported off. Models compressor run-on and avoids flapping near the setpoint.
 DEFAULT_COMPRESSOR_OFF_DELAY = 300
 
-# Optional air-conditioner diagnostic entities exposed via the options flow.
+# Optional air-conditioner diagnostics. The fan option exposes a reported state,
+# not proof of physical fan motion.
 CONF_COMPRESSOR_SENSOR = "compressor"
 CONF_CURRENT_FAN_SPEED_SENSOR = "current_fan_speed"

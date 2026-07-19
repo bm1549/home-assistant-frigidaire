@@ -44,8 +44,8 @@ During setup — or at any time via **Configure** — you can enable additional 
 | Check Filter | Problem binary sensor | On for `CLEAN`, `CHANGE`, or `BUY`; exposes `filter_state` for notification automations |
 | Filter Runtime | Duration sensor | Cumulative filter runtime reported by the appliance, in hours |
 | Active Alerts | Problem binary sensor | On while fault codes are active; exposes them in `active_alerts` |
-| Compressor | Running binary sensor | Estimated compressor state for air conditioners |
-| Current Fan Speed | Sensor | Actual running fan speed reported by an air conditioner |
+| Compressor Estimate | Running binary sensor | Temperature-based compressor estimate for air conditioners |
+| Reported Fan Speed | Sensor | Reported `fanSpeedState`; can resolve `AUTO`, but may persist while powered off and is not physical running telemetry |
 
 Each device is configured independently, so a home with both an AC and a dehumidifier can have different entities enabled for each.
 The optional diagnostic entities reuse the appliance platform's normal cloud response and do not add API polling.

@@ -137,7 +137,7 @@ class FrigidaireCompressorSensor(BinarySensorEntity):
         self._appliance = appliance
         self._state_store = state_store
         self._attr_unique_id = f"{appliance.appliance_id}_compressor"
-        self._attr_name = "Compressor"
+        self._attr_name = "Compressor Estimate"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, appliance.appliance_id)},
             name=appliance.nickname,
