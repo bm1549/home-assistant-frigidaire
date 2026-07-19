@@ -25,8 +25,8 @@ SENSOR_OPTIONS: dict[str, str] = {
 }
 
 # Climate compressor-state estimation options. Set per air-conditioner appliance
-# via the integration's Configure (options) flow and consumed by climate.py when
-# inferring hvac_action.
+# via the integration's Configure (options) flow and consumed by the shared
+# appliance coordinator when inferring hvac_action.
 CONF_COOL_HYSTERESIS = "cool_hysteresis"
 CONF_COMPRESSOR_OFF_DELAY = "compressor_off_delay"
 

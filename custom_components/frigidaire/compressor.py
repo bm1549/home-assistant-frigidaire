@@ -27,3 +27,26 @@ def estimate_compressor_running(
         return previous, satisfied_since
 
     return previous, None
+
+
+class CompressorEstimator:
+    """Maintain one compressor estimate across coordinator refreshes."""
+
+    def __init__(self, *, hysteresis: float, off_delay: float) -> None:
+        self.hysteresis = hysteresis
+        self.off_delay = off_delay
+        self.running = True
+        self.satisfied_since: float | None = None
+
+    def update(self, current: float | None, target: float | None, *, now: float) -> bool:
+        """Update and return the shared estimate."""
+        self.running, self.satisfied_since = estimate_compressor_running(
+            current,
+            target,
+            hysteresis=self.hysteresis,
+            off_delay=self.off_delay,
+            previous=self.running,
+            satisfied_since=self.satisfied_since,
+            now=now,
+        )
+        return self.running

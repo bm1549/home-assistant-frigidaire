@@ -1,6 +1,6 @@
 """Tests for temperature-based compressor estimation."""
 
-from compressor import estimate_compressor_running
+from compressor import CompressorEstimator, estimate_compressor_running
 
 
 def estimate(
@@ -52,3 +52,11 @@ def test_missing_temperature_holds_previous_estimate():
 
 def test_rising_temperature_restarts_compressor_immediately():
     assert estimate(72, 70, previous=False, satisfied_since=50) == (True, None)
+
+
+def test_stateful_estimator_shares_transition_state():
+    estimator = CompressorEstimator(hysteresis=0, off_delay=180)
+
+    assert estimator.update(70, 70, now=100) is True
+    assert estimator.update(70, 70, now=280) is False
+    assert estimator.update(72, 70, now=281) is True

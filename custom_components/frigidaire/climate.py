@@ -23,26 +23,16 @@ from homeassistant.components.climate.const import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 import frigidaire
 
-from .compressor import estimate_compressor_running
-from .const import (
-    CONF_COMPRESSOR_OFF_DELAY,
-    CONF_COOL_HYSTERESIS,
-    DEFAULT_COMPRESSOR_OFF_DELAY,
-    DEFAULT_COOL_HYSTERESIS,
-    DOMAIN,
-)
-from .diagnostics import (
-    AIR_FILTER_LIFETIME_KEY,
-    filter_needs_attention,
-    normalize_alerts,
-    normalize_filter_state,
-)
+from .const import DOMAIN
+from .coordinator import FrigidaireApplianceCoordinator
+from .diagnostics import filter_needs_attention
 from .helpers import suggest_area
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,33 +45,15 @@ def _normalize_enum_value(value):
     return value
 
 
-def _coerce_float(value, default) -> float:
-    """Coerce an option value to float, falling back to default on bad input."""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return float(default)
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     """Set up frigidaire from a config entry."""
-    client = hass.data[DOMAIN][entry.entry_id]["client"]
+    coordinators: dict[str, FrigidaireApplianceCoordinator] = hass.data[DOMAIN][entry.entry_id]["coordinators"]
     appliances: list[frigidaire.Appliance] = hass.data[DOMAIN][entry.entry_id]["appliances"]
-    state_store: dict = hass.data[DOMAIN][entry.entry_id].setdefault("climate_state", {})
 
     async_add_entities(
-        [
-            FrigidaireClimate(
-                client,
-                appliance,
-                suggest_area(hass, appliance.nickname),
-                entry.options.get(appliance.appliance_id, {}),
-                state_store,
-            )
-            for appliance in appliances
-            if appliance.destination == frigidaire.Destination.AIR_CONDITIONER
-        ],
-        update_before_add=True,
+        FrigidaireClimate(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
+        for appliance in appliances
+        if appliance.destination == frigidaire.Destination.AIR_CONDITIONER
     )
 
 
@@ -143,45 +115,18 @@ HA_TO_FRIGIDAIRE_PRESET = {
 
 OPTIMISTIC_WINDOW = 5  # seconds
 
-# Raw reported fan-speed state. It can resolve AUTO to a concrete level, but it
-# persists while the appliance is off and is not physical running telemetry.
-# Keep the raw key for library versions predating FAN_SPEED_STATE.
-FAN_SPEED_STATE_KEY = "fanSpeedState"
-
-
-class FrigidaireClimate(ClimateEntity):
+class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], ClimateEntity):
     """Representation of a Frigidaire appliance."""
 
-    def __init__(
-        self,
-        client,
-        appliance,
-        suggested_area: str | None = None,
-        options: Mapping[str, Any] | None = None,
-        state_store: dict | None = None,
-    ):
+    def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None):
         """Build FrigidaireClimate.
 
-        client: the client used to contact the frigidaire API
-        appliance: the basic information about the frigidaire appliance, used to contact
-            the API
-        options: per-appliance options from the config entry (compressor-state
-            estimation tuning, etc.)
-        state_store: per-entry dict the entity publishes compressor / fan state
-            into for the optional diagnostic sensor entities to read.
+        coordinator: shared per-appliance coordinator that polls the frigidaire API
         """
 
-        self._client: frigidaire.Frigidaire = client
-        self._appliance: frigidaire.Appliance = appliance
-        self._details: dict = {}
-        self._state_store = state_store
-
-        # Compressor-state estimation tuning (configurable via the options flow).
-        options = options or {}
-        self._cool_hysteresis = _coerce_float(options.get(CONF_COOL_HYSTERESIS), DEFAULT_COOL_HYSTERESIS)
-        self._compressor_off_delay = _coerce_float(
-            options.get(CONF_COMPRESSOR_OFF_DELAY), DEFAULT_COMPRESSOR_OFF_DELAY
-        )
+        super().__init__(coordinator)
+        self._client: frigidaire.Frigidaire = coordinator.client
+        self._appliance: frigidaire.Appliance = coordinator.appliance
 
         # Optimistic state — holds values for OPTIMISTIC_WINDOW seconds after a command
         self._optimistic_until: float = 0
@@ -190,12 +135,6 @@ class FrigidaireClimate(ClimateEntity):
         self._optimistic_fan_mode: str | None = None
         self._optimistic_preset_mode: str | None = None
         self._optimistic_swing_mode: str | None = None
-
-        # Monotonic timestamp of when the room first dropped below the setpoint
-        # band, and the last estimated compressor state. Used to delay flipping
-        # hvac_action to idle and to hold state inside the hysteresis deadband.
-        self._compressor_satisfied_since: float | None = None
-        self._compressor_estimate: bool = True
 
         # Entity Class Attributes
         self._attr_unique_id = self._appliance.appliance_id
@@ -233,6 +172,21 @@ class FrigidaireClimate(ClimateEntity):
             HVACMode.DRY,
         ]
 
+    @property
+    def _details(self) -> dict:
+        return self.coordinator.data or {}
+
+    @property
+    def available(self) -> bool:
+        # Prefer applianceState when present; fall back to a reported mode, since
+        # some portable AC models (e.g. FHPW-series) omit applianceState from
+        # their API response.
+        if not super().available:
+            return False
+        appliance_state = self._details.get(frigidaire.Detail.APPLIANCE_STATE)
+        mode = self._details.get(frigidaire.Detail.MODE)
+        return appliance_state is not None or mode is not None
+
     def _set_optimistic_window(self) -> None:
         self._optimistic_until = time.monotonic() + OPTIMISTIC_WINDOW
 
@@ -246,42 +200,6 @@ class FrigidaireClimate(ClimateEntity):
         self._optimistic_preset_mode = None
         self._optimistic_swing_mode = None
 
-    def _is_compressor_running(self) -> bool:
-        """Estimate whether the compressor is actively cooling/drying.
-
-        The Frigidaire API does not expose compressor state directly, so infer
-        it. A window / room AC only runs the compressor while the room is above
-        the target setpoint. Two configurable knobs shape the estimate:
-
-        - cool_hysteresis: a deadband (in the device's temperature unit) around
-          the setpoint. The compressor is reported cooling above
-          target + hysteresis and idle below target - hysteresis; inside the
-          band the previous estimate is held, which prevents flapping when the
-          room hovers around the setpoint.
-        - compressor_off_delay: how long the room must stay below the band before
-          we flip to idle, modelling compressor run-on. Cooling is reported again
-          immediately once the room rises back above the band.
-
-        fanSpeedState is deliberately excluded: live devices retain that value
-        while powered off, so it is not evidence that the fan or compressor is
-        physically running.
-
-        This estimate exists mainly to feed energy-usage calculations, so it errs
-        toward reporting activity when the device gives us nothing to go on.
-        """
-        current = self.current_temperature
-        target = self.target_temperature
-        self._compressor_estimate, self._compressor_satisfied_since = estimate_compressor_running(
-            current,
-            target,
-            hysteresis=self._cool_hysteresis,
-            off_delay=self._compressor_off_delay,
-            previous=self._compressor_estimate,
-            satisfied_since=self._compressor_satisfied_since,
-            now=time.monotonic(),
-        )
-        return self._compressor_estimate
-
     @property
     def reported_fan_speed(self) -> str | None:
         """Return the appliance's reported fan-speed state.
@@ -289,10 +207,7 @@ class FrigidaireClimate(ClimateEntity):
         This can resolve an AUTO setting to a concrete level, but it may retain
         the last value while the appliance is off and is not running telemetry.
         """
-        raw = self._details.get(FAN_SPEED_STATE_KEY)
-        if raw is None:
-            return None
-        return FRIGIDAIRE_TO_HA_FAN_SPEED.get(_normalize_enum_value(raw), str(raw).lower())
+        return self.coordinator.reported_fan_speed
 
     @property
     def temperature_unit(self):
@@ -341,7 +256,10 @@ class FrigidaireClimate(ClimateEntity):
         # estimated to be running; otherwise the unit is idling (fan-only).
         if mode == HVACMode.FAN_ONLY:
             return HVACAction.FAN
-        if not self._is_compressor_running():
+        compressor_running = self.coordinator.compressor_running
+        if compressor_running is None:
+            return None
+        if not compressor_running:
             return HVACAction.IDLE
         if mode == HVACMode.DRY:
             return HVACAction.DRYING
@@ -410,7 +328,7 @@ class FrigidaireClimate(ClimateEntity):
         )
         self._optimistic_preset_mode = preset_mode
         self._set_optimistic_window()
-        self.schedule_update_ha_state(force_refresh=False)
+        self.schedule_update_ha_state(force_refresh=True)
 
     def set_swing_mode(self, swing_mode: str) -> None:
         if swing_mode not in HA_TO_FRIGIDAIRE_SWING:
@@ -420,7 +338,7 @@ class FrigidaireClimate(ClimateEntity):
         )
         self._optimistic_swing_mode = swing_mode
         self._set_optimistic_window()
-        self.schedule_update_ha_state(force_refresh=False)
+        self.schedule_update_ha_state(force_refresh=True)
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
@@ -446,7 +364,7 @@ class FrigidaireClimate(ClimateEntity):
         self._client.execute_action(self._appliance, frigidaire.Action.set_temperature(temperature, temperature_unit))
         self._optimistic_temperature = float(temperature)
         self._set_optimistic_window()
-        self.schedule_update_ha_state(force_refresh=False)
+        self.schedule_update_ha_state(force_refresh=True)
 
     def set_fan_mode(self, fan_mode):
         """Set new target fan mode."""
@@ -457,7 +375,7 @@ class FrigidaireClimate(ClimateEntity):
         )
         self._optimistic_fan_mode = fan_mode
         self._set_optimistic_window()
-        self.schedule_update_ha_state(force_refresh=False)
+        self.schedule_update_ha_state(force_refresh=True)
 
     def set_hvac_mode(self, hvac_mode):
         """Set new target operation mode."""
@@ -485,55 +403,11 @@ class FrigidaireClimate(ClimateEntity):
 
         self._optimistic_hvac_mode = hvac_mode
         self._set_optimistic_window()
-        self.schedule_update_ha_state(force_refresh=False)
+        self.schedule_update_ha_state(force_refresh=True)
 
-    def update(self):
-        """Retrieve latest state and updates the details."""
-        try:
-            details = self._client.get_appliance_details(self._appliance)
-            self._details = details
-        except frigidaire.FrigidaireException:
-            if self.available:
-                _LOGGER.error("Failed to connect to Frigidaire servers")
-            self._attr_available = False
-        else:
-            # If we successfully retrieved details, the appliance is available.
-            # Prefer applianceState when present; fall back to checking for a
-            # reported mode, since some portable AC models (e.g. FHPW-series)
-            # omit applianceState from their API response.
-            appliance_state = self._details.get(frigidaire.Detail.APPLIANCE_STATE)
-            mode = self._details.get(frigidaire.Detail.MODE)
-            self._attr_available = appliance_state is not None or mode is not None
-
-            if not self._is_optimistic():
-                self._clear_optimistic()
-        finally:
-            self._publish_shared_state()
-
-    def _publish_shared_state(self) -> None:
-        """Publish state for the optional diagnostic entities.
-
-        Optional entities read this store so they remain synchronized with the
-        climate entity without making their own API calls.
-        """
-        if self._state_store is None:
-            return
-        if not self._attr_available:
-            self._state_store[self._appliance.appliance_id] = {
-                "available": False,
-                "active_alerts": None,
-                "compressor_running": None,
-                "reported_fan_speed": None,
-                "filter_runtime": None,
-                "filter_state": None,
-            }
-            return
-        action = self.hvac_action
-        self._state_store[self._appliance.appliance_id] = {
-            "available": True,
-            "active_alerts": normalize_alerts(self._details.get(frigidaire.Detail.ALERTS)),
-            "compressor_running": None if action is None else action in (HVACAction.COOLING, HVACAction.DRYING),
-            "reported_fan_speed": self.reported_fan_speed,
-            "filter_runtime": self._details.get(AIR_FILTER_LIFETIME_KEY),
-            "filter_state": normalize_filter_state(self._details.get(frigidaire.Detail.FILTER_STATE)),
-        }
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Drop stale optimistic values once the command window has elapsed."""
+        if not self._is_optimistic():
+            self._clear_optimistic()
+        super()._handle_coordinator_update()

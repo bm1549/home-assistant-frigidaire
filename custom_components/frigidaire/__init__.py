@@ -12,6 +12,7 @@ import frigidaire
 
 from .auth_store import load_auth, per_entry_auth_path, resolve_initial_auth_path, save_auth
 from .const import DOMAIN, PLATFORMS
+from .coordinator import FrigidaireApplianceCoordinator
 
 # Guards writes to an entry's auth file: the client may re-authenticate from
 # multiple entity worker threads, so its persist callback can fire concurrently.
@@ -22,7 +23,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up frigidaire from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    def setup(username: str, password: str) -> None:
+    def setup(username: str, password: str) -> tuple[frigidaire.Frigidaire, list[frigidaire.Appliance]]:
         # Each entry persists to its own file so multiple accounts don't clobber
         # each other's session keys (which would force re-auth and trip cas_3403).
         auth_path: str = per_entry_auth_path(hass.config.path(), entry.entry_id)
@@ -53,13 +54,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # (climate, humidifier, number, switch) instead of each calling the
             # API separately.
             appliances = client.get_appliances()
-            hass.data[DOMAIN][entry.entry_id] = {
-                "client": client,
-                "appliances": appliances,
-                # Per-appliance state published by the owning climate/humidifier
-                # entity and read by optional diagnostics without extra API calls.
-                "climate_state": {},
-            }
+            return client, appliances
         except ConnectionError as err:
             raise ConfigEntryNotReady("Cannot connect to Frigidaire") from err
         except frigidaire.FrigidaireException as err:
@@ -70,7 +65,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 raise ConfigEntryNotReady("Rate limited by Frigidaire. Will retry automatically.") from err
             raise ConfigEntryNotReady(f"Frigidaire error during setup: {err}") from err
 
-    await hass.async_add_executor_job(setup, entry.data["username"], entry.data["password"])
+    client, appliances = await hass.async_add_executor_job(setup, entry.data["username"], entry.data["password"])
+
+    # One coordinator per appliance consolidates polling: every entity for a
+    # device reads from a single shared fetch instead of hitting the API on its
+    # own schedule. A first refresh here primes the data; individual failures are
+    # tolerated (the coordinator backs off and retries) so one flaky appliance
+    # doesn't block the whole entry from loading.
+    coordinators: dict[str, FrigidaireApplianceCoordinator] = {}
+    for appliance in appliances:
+        coordinator = FrigidaireApplianceCoordinator(
+            hass,
+            client,
+            appliance,
+            entry.options.get(appliance.appliance_id, {}),
+        )
+        await coordinator.async_refresh()
+        coordinators[appliance.appliance_id] = coordinator
+
+    hass.data[DOMAIN][entry.entry_id] = {
+        "client": client,
+        "appliances": appliances,
+        "coordinators": coordinators,
+    }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
