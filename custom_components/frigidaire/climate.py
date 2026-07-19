@@ -145,16 +145,20 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             manufacturer="Frigidaire",
             suggested_area=suggested_area,
         )
-        self._attr_supported_features = (
+        # Base feature set. SWING_MODE is added dynamically by _update_swing_support()
+        # only when the device actually reports a VERTICAL_SWING detail — some models
+        # (e.g. FHWW144TF1) have no motorized louver and don't support it.
+        self._base_supported_features = (
             ClimateEntityFeature.TARGET_TEMPERATURE
             | ClimateEntityFeature.FAN_MODE
             | ClimateEntityFeature.PRESET_MODE
-            | ClimateEntityFeature.SWING_MODE
             | ClimateEntityFeature.TURN_OFF
             | ClimateEntityFeature.TURN_ON
         )
+        self._attr_supported_features = self._base_supported_features
         self._attr_preset_modes = [PRESET_NONE, PRESET_SLEEP]
-        self._attr_swing_modes = [SWING_OFF, SWING_VERTICAL]
+        # Populated by _update_swing_support() once swing support is detected.
+        self._attr_swing_modes = None
         self._attr_target_temperature_step = 1
 
         self._attr_fan_modes = [
@@ -172,9 +176,27 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             HVACMode.DRY,
         ]
 
+        # coordinator.data is already populated at this point (async_setup_entry
+        # awaits the first refresh before entities are created), so detect swing
+        # support up front rather than waiting for the first coordinator update.
+        self._update_swing_support()
+
     @property
     def _details(self) -> dict:
         return self.coordinator.data or {}
+
+    def _update_swing_support(self) -> None:
+        """Advertise SWING_MODE only when the device reports a VERTICAL_SWING detail.
+
+        Models without a motorized louver (e.g. FHWW144TF1) omit it, so we must
+        not advertise a control that does nothing on those units.
+        """
+        if self._details.get(frigidaire.Detail.VERTICAL_SWING) is not None:
+            self._attr_supported_features = self._base_supported_features | ClimateEntityFeature.SWING_MODE
+            self._attr_swing_modes = [SWING_OFF, SWING_VERTICAL]
+        else:
+            self._attr_supported_features = self._base_supported_features
+            self._attr_swing_modes = None
 
     @property
     def available(self) -> bool:
@@ -270,6 +292,8 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
     @property
     def swing_mode(self) -> str | None:
         """Return the swing setting."""
+        if not self._attr_supported_features & ClimateEntityFeature.SWING_MODE:
+            return None
         if self._is_optimistic() and self._optimistic_swing_mode is not None:
             return self._optimistic_swing_mode
         swing = _normalize_enum_value(self._details.get(frigidaire.Detail.VERTICAL_SWING))
@@ -313,6 +337,8 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         self.schedule_update_ha_state(force_refresh=True)
 
     def set_swing_mode(self, swing_mode: str) -> None:
+        if not self._attr_supported_features & ClimateEntityFeature.SWING_MODE:
+            return
         if swing_mode not in HA_TO_FRIGIDAIRE_SWING:
             return
         self._client.execute_action(
@@ -386,4 +412,5 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         """Drop stale optimistic values once the command window has elapsed."""
         if not self._is_optimistic():
             self._clear_optimistic()
+        self._update_swing_support()
         super()._handle_coordinator_update()
