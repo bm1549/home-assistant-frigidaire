@@ -89,8 +89,13 @@ HA_TO_FRIGIDAIRE_FAN_MODE = {
     FAN_HIGH: frigidaire.FanSpeed.HIGH,
 }
 
+# frigidaire.Mode.AUTO is a dehumidifier-only value (see frigidaire.Mode); this
+# platform only ever handles Destination.AIR_CONDITIONER appliances (see
+# async_setup_entry below), whose energy-saving mode is Mode.ECO. Sending
+# Mode.AUTO to an AC unit is silently ignored, so HVACMode.AUTO must map to
+# Mode.ECO here to round-trip with FRIGIDAIRE_TO_HA_MODE's ECO -> AUTO mapping.
 HA_TO_FRIGIDAIRE_HVAC_MODE = {
-    HVACMode.AUTO: frigidaire.Mode.AUTO,
+    HVACMode.AUTO: frigidaire.Mode.ECO,
     HVACMode.FAN_ONLY: frigidaire.Mode.FAN,
     HVACMode.COOL: frigidaire.Mode.COOL,
     HVACMode.OFF: frigidaire.Mode.OFF,
