@@ -1,7 +1,7 @@
 """Constants for the frigidaire integration."""
 
 DOMAIN = "frigidaire"
-PLATFORMS = ["binary_sensor", "climate", "humidifier", "number", "switch"]
+PLATFORMS = ["binary_sensor", "climate", "humidifier", "number", "sensor", "switch"]
 
 # Keys must match SwitchDescription.key values in switch.py
 SWITCH_OPTIONS: dict[str, str] = {
