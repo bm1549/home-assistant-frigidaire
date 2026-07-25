@@ -189,7 +189,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         current = self._options.get(appliance.appliance_id, {})
 
         if user_input is not None:
-            self._options[appliance.appliance_id] = user_input
+            self._options[appliance.appliance_id] = {**current, **user_input}
             self._pending_appliances.pop(0)
             return await self._async_next_device_step()
 
