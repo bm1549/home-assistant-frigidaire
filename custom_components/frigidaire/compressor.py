@@ -38,6 +38,12 @@ class CompressorEstimator:
         self.running = True
         self.satisfied_since: float | None = None
 
+    def force_off(self) -> bool:
+        """Reset the estimate when operating state proves the compressor is off."""
+        self.running = False
+        self.satisfied_since = None
+        return self.running
+
     def update(self, current: float | None, target: float | None, *, now: float) -> bool:
         """Update and return the shared estimate."""
         self.running, self.satisfied_since = estimate_compressor_running(

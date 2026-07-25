@@ -105,10 +105,10 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
         if mode == frigidaire.Mode.OFF or (
             appliance_state is not None and appliance_state != frigidaire.ApplianceState.RUNNING
         ):
-            self._compressor_running = False
+            self._compressor_running = self._compressor_estimator.force_off()
             return
         if mode == frigidaire.Mode.FAN:
-            self._compressor_running = False
+            self._compressor_running = self._compressor_estimator.force_off()
             return
         if mode not in (frigidaire.Mode.COOL, frigidaire.Mode.ECO, frigidaire.Mode.AUTO, frigidaire.Mode.DRY):
             self._compressor_running = None

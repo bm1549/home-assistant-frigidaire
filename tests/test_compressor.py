@@ -60,3 +60,11 @@ def test_stateful_estimator_shares_transition_state():
     assert estimator.update(70, 70, now=100) is True
     assert estimator.update(70, 70, now=280) is False
     assert estimator.update(72, 70, now=281) is True
+
+
+def test_forced_off_clears_stale_running_state():
+    estimator = CompressorEstimator(hysteresis=0, off_delay=180)
+
+    assert estimator.update(72, 70, now=100) is True
+    estimator.force_off()
+    assert estimator.update(70, 70, now=101) is False
