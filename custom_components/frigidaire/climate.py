@@ -396,7 +396,9 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         else:
             if hvac_mode not in HA_TO_FRIGIDAIRE_HVAC_MODE:
                 return
-            if _normalize_enum_value(self._details.get(frigidaire.Detail.MODE)) == frigidaire.Mode.OFF:
+            appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
+            frigidaire_mode = _normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
+            if appliance_state == frigidaire.ApplianceState.OFF or frigidaire_mode == frigidaire.Mode.OFF:
                 self._client.execute_action(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
                 # temperature reverts to default when the device is turned on
                 current_temp = self.target_temperature
