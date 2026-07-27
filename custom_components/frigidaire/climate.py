@@ -249,6 +249,9 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         """Return current operation i.e. heat, cool, idle."""
         if self._is_optimistic() and self._optimistic_hvac_mode is not None:
             return self._optimistic_hvac_mode
+        appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
+        if appliance_state == frigidaire.ApplianceState.OFF:
+            return HVACMode.OFF
         frigidaire_mode = _normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
 
         if frigidaire_mode not in FRIGIDAIRE_TO_HA_MODE:
