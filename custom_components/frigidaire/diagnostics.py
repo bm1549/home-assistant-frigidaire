@@ -15,7 +15,7 @@ def normalize_alerts(value: Any) -> list[str] | None:
     if value is None:
         return None
 
-    raw_alerts = value if isinstance(value, (list, tuple, set, frozenset)) else [value]
+    raw_alerts = value if isinstance(value, list | tuple | set | frozenset) else [value]
     alerts: list[str] = []
     for alert in raw_alerts:
         code = alert.get("code") if isinstance(alert, Mapping) else alert
