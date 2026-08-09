@@ -66,9 +66,9 @@ class FrigidaireCheckFilterSensor(CoordinatorEntity[FrigidaireApplianceCoordinat
 
     @property
     def available(self) -> bool:
-        return super().available and normalize_filter_state(
-            self._details.get(frigidaire.Detail.FILTER_STATE)
-        ) is not None
+        return (
+            super().available and normalize_filter_state(self._details.get(frigidaire.Detail.FILTER_STATE)) is not None
+        )
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
