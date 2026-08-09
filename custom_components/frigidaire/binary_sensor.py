@@ -16,13 +16,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 import frigidaire
 
 from .const import (
-    CONF_ACTIVE_ALERTS_SENSOR,
     CONF_CHECK_FILTER_SENSOR,
-    CONF_COMPRESSOR_SENSOR,
     DOMAIN,
 )
 from .coordinator import FrigidaireApplianceCoordinator
-from .diagnostics import filter_needs_attention, normalize_alerts, normalize_filter_state
+from .diagnostics import filter_needs_attention, normalize_filter_state
 from .helpers import suggest_area
 
 
@@ -39,18 +37,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         FrigidaireCheckFilterSensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
         for appliance in appliances
         if options.get(appliance.appliance_id, {}).get(CONF_CHECK_FILTER_SENSOR, False)
-    ]
-    entities += [
-        FrigidaireActiveAlertsSensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
-        for appliance in appliances
-        if options.get(appliance.appliance_id, {}).get(CONF_ACTIVE_ALERTS_SENSOR, False)
-    ]
-
-    entities += [
-        FrigidaireCompressorSensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
-        for appliance in appliances
-        if appliance.destination == frigidaire.Destination.AIR_CONDITIONER
-        and options.get(appliance.appliance_id, {}).get(CONF_COMPRESSOR_SENSOR, False)
     ]
 
     async_add_entities(entities)
@@ -94,70 +80,3 @@ class FrigidaireCheckFilterSensor(CoordinatorEntity[FrigidaireApplianceCoordinat
     @property
     def is_on(self) -> bool | None:
         return filter_needs_attention(self._details.get(frigidaire.Detail.FILTER_STATE))
-
-
-class FrigidaireActiveAlertsSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
-    """Binary sensor that is ON while the appliance reports active alerts."""
-
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None) -> None:
-        super().__init__(coordinator)
-        self._appliance = coordinator.appliance
-        self._attr_unique_id = f"{self._appliance.appliance_id}_active_alerts"
-        self._attr_name = "Active Alerts"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._appliance.appliance_id)},
-            name=self._appliance.nickname,
-            manufacturer="Frigidaire",
-            suggested_area=suggested_area,
-        )
-
-    @property
-    def _details(self) -> dict:
-        return self.coordinator.data or {}
-
-    @property
-    def _active_alerts(self) -> list[str] | None:
-        return normalize_alerts(self._details.get(frigidaire.Detail.ALERTS))
-
-    @property
-    def available(self) -> bool:
-        return super().available and self._active_alerts is not None
-
-    @property
-    def extra_state_attributes(self) -> Mapping[str, Any] | None:
-        if self._active_alerts is None:
-            return None
-        return {"active_alerts": self._active_alerts}
-
-    @property
-    def is_on(self) -> bool | None:
-        return None if self._active_alerts is None else bool(self._active_alerts)
-
-
-class FrigidaireCompressorSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
-    """Binary sensor for the coordinator-owned compressor estimate."""
-
-    _attr_device_class = BinarySensorDeviceClass.RUNNING
-
-    def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None) -> None:
-        super().__init__(coordinator)
-        self._appliance = coordinator.appliance
-        self._attr_unique_id = f"{self._appliance.appliance_id}_compressor"
-        self._attr_name = "Compressor Estimate"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._appliance.appliance_id)},
-            name=self._appliance.nickname,
-            manufacturer="Frigidaire",
-            suggested_area=suggested_area,
-        )
-
-    @property
-    def available(self) -> bool:
-        return super().available and self.coordinator.compressor_running is not None
-
-    @property
-    def is_on(self) -> bool | None:
-        return self.coordinator.compressor_running

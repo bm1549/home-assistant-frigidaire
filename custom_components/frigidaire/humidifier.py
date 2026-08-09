@@ -181,6 +181,7 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
         bin_full = False
         alerts = normalize_alerts(self._details.get(frigidaire.Detail.ALERTS))
         if alerts is not None:
+            attrib["active_alerts"] = alerts
             bin_full = "BUCKET_FULL" in alerts
 
         # Fallback to waterBucketLevel if alert is not set

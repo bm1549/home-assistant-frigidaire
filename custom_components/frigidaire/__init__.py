@@ -74,12 +74,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # doesn't block the whole entry from loading.
     coordinators: dict[str, FrigidaireApplianceCoordinator] = {}
     for appliance in appliances:
-        coordinator = FrigidaireApplianceCoordinator(
-            hass,
-            client,
-            appliance,
-            entry.options.get(appliance.appliance_id, {}),
-        )
+        coordinator = FrigidaireApplianceCoordinator(hass, client, appliance)
         await coordinator.async_refresh()
         coordinators[appliance.appliance_id] = coordinator
 

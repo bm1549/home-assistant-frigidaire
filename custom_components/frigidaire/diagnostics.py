@@ -37,12 +37,12 @@ def filter_needs_attention(value: Any) -> bool | None:
     return None if state is None else state != GOOD_FILTER_STATE
 
 
-def filter_runtime_hours(value: Any) -> float | None:
-    """Convert reported cumulative filter-runtime seconds to hours."""
+def filter_runtime_seconds(value: Any) -> float | None:
+    """Return valid cumulative filter-runtime seconds."""
     try:
         seconds = float(value)
     except (TypeError, ValueError):
         return None
     if not math.isfinite(seconds) or seconds < 0:
         return None
-    return seconds / 3600
+    return seconds

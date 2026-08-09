@@ -5,7 +5,7 @@ import math
 import pytest
 from diagnostics import (
     filter_needs_attention,
-    filter_runtime_hours,
+    filter_runtime_seconds,
     normalize_alerts,
     normalize_filter_state,
 )
@@ -46,8 +46,8 @@ def test_normalize_alerts(alerts, expected):
 @pytest.mark.parametrize(
     ("seconds", "expected"),
     [
-        (482400, 134),
-        ("3600", 1),
+        (482400, 482400),
+        ("3600", 3600),
         (0, 0),
         (None, None),
         ("invalid", None),
@@ -55,5 +55,5 @@ def test_normalize_alerts(alerts, expected):
         (math.inf, None),
     ],
 )
-def test_filter_runtime_hours(seconds, expected):
-    assert filter_runtime_hours(seconds) == expected
+def test_filter_runtime_seconds(seconds, expected):
+    assert filter_runtime_seconds(seconds) == expected

@@ -32,7 +32,7 @@ import frigidaire
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
-from .diagnostics import filter_needs_attention
+from .diagnostics import filter_needs_attention, normalize_alerts
 from .helpers import suggest_area
 
 _LOGGER = logging.getLogger(__name__)
@@ -90,8 +90,13 @@ HA_TO_FRIGIDAIRE_FAN_MODE = {
     FAN_HIGH: frigidaire.FanSpeed.HIGH,
 }
 
+# frigidaire.Mode.AUTO is a dehumidifier-only value (see frigidaire.Mode); this
+# platform only ever handles Destination.AIR_CONDITIONER appliances (see
+# async_setup_entry below), whose energy-saving mode is Mode.ECO. Sending
+# Mode.AUTO to an AC unit is silently ignored, so HVACMode.AUTO must map to
+# Mode.ECO here to round-trip with FRIGIDAIRE_TO_HA_MODE's ECO -> AUTO mapping.
 HA_TO_FRIGIDAIRE_HVAC_MODE = {
-    HVACMode.AUTO: frigidaire.Mode.AUTO,
+    HVACMode.AUTO: frigidaire.Mode.ECO,
     HVACMode.FAN_ONLY: frigidaire.Mode.FAN,
     HVACMode.COOL: frigidaire.Mode.COOL,
     HVACMode.OFF: frigidaire.Mode.OFF,
@@ -114,6 +119,7 @@ HA_TO_FRIGIDAIRE_PRESET = {
 }
 
 OPTIMISTIC_WINDOW = 5  # seconds
+
 
 class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], ClimateEntity):
     """Representation of a Frigidaire appliance."""
@@ -145,16 +151,20 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             manufacturer="Frigidaire",
             suggested_area=suggested_area,
         )
-        self._attr_supported_features = (
+        # Base feature set. SWING_MODE is added dynamically by _update_swing_support()
+        # only when the device actually reports a VERTICAL_SWING detail — some models
+        # (e.g. FHWW144TF1) have no motorized louver and don't support it.
+        self._base_supported_features = (
             ClimateEntityFeature.TARGET_TEMPERATURE
             | ClimateEntityFeature.FAN_MODE
             | ClimateEntityFeature.PRESET_MODE
-            | ClimateEntityFeature.SWING_MODE
             | ClimateEntityFeature.TURN_OFF
             | ClimateEntityFeature.TURN_ON
         )
+        self._attr_supported_features = self._base_supported_features
         self._attr_preset_modes = [PRESET_NONE, PRESET_SLEEP]
-        self._attr_swing_modes = [SWING_OFF, SWING_VERTICAL]
+        # Populated by _update_swing_support() once swing support is detected.
+        self._attr_swing_modes = None
         self._attr_target_temperature_step = 1
 
         self._attr_fan_modes = [
@@ -172,9 +182,27 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             HVACMode.DRY,
         ]
 
+        # coordinator.data is already populated at this point (async_setup_entry
+        # awaits the first refresh before entities are created), so detect swing
+        # support up front rather than waiting for the first coordinator update.
+        self._update_swing_support()
+
     @property
     def _details(self) -> dict:
         return self.coordinator.data or {}
+
+    def _update_swing_support(self) -> None:
+        """Advertise SWING_MODE only when the device reports a VERTICAL_SWING detail.
+
+        Models without a motorized louver (e.g. FHWW144TF1) omit it, so we must
+        not advertise a control that does nothing on those units.
+        """
+        if self._details.get(frigidaire.Detail.VERTICAL_SWING) is not None:
+            self._attr_supported_features = self._base_supported_features | ClimateEntityFeature.SWING_MODE
+            self._attr_swing_modes = [SWING_OFF, SWING_VERTICAL]
+        else:
+            self._attr_supported_features = self._base_supported_features
+            self._attr_swing_modes = None
 
     @property
     def available(self) -> bool:
@@ -231,6 +259,9 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         """Return current operation i.e. heat, cool, idle."""
         if self._is_optimistic() and self._optimistic_hvac_mode is not None:
             return self._optimistic_hvac_mode
+        appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
+        if appliance_state == frigidaire.ApplianceState.OFF:
+            return HVACMode.OFF
         frigidaire_mode = _normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
 
         if frigidaire_mode not in FRIGIDAIRE_TO_HA_MODE:
@@ -243,24 +274,15 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
     def hvac_action(self) -> HVACAction | None:
         """Return the current HVAC action."""
         mode = self.hvac_mode
-        if mode is None:
-            return None
         if mode == HVACMode.OFF:
             return HVACAction.OFF
         appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
-        if appliance_state is not None and appliance_state != frigidaire.ApplianceState.RUNNING:
-            # OFF or DELAYED_START — the unit is powered but not conditioning.
+        if appliance_state != frigidaire.ApplianceState.RUNNING:
             return HVACAction.IDLE
-        # The fan runs whenever the unit is on, but the compressor cycles
-        # independently. Only report cooling/drying while the compressor is
-        # estimated to be running; otherwise the unit is idling (fan-only).
+        # Running — report the action that matches the active mode rather than
+        # collapsing everything to COOLING.
         if mode == HVACMode.FAN_ONLY:
             return HVACAction.FAN
-        compressor_running = self.coordinator.compressor_running
-        if compressor_running is None:
-            return None
-        if not compressor_running:
-            return HVACAction.IDLE
         if mode == HVACMode.DRY:
             return HVACAction.DRYING
         return HVACAction.COOLING
@@ -288,6 +310,8 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
     @property
     def swing_mode(self) -> str | None:
         """Return the swing setting."""
+        if not self._attr_supported_features & ClimateEntityFeature.SWING_MODE:
+            return None
         if self._is_optimistic() and self._optimistic_swing_mode is not None:
             return self._optimistic_swing_mode
         swing = _normalize_enum_value(self._details.get(frigidaire.Detail.VERTICAL_SWING))
@@ -331,6 +355,8 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         self.schedule_update_ha_state(force_refresh=True)
 
     def set_swing_mode(self, swing_mode: str) -> None:
+        if not self._attr_supported_features & ClimateEntityFeature.SWING_MODE:
+            return
         if swing_mode not in HA_TO_FRIGIDAIRE_SWING:
             return
         self._client.execute_action(
@@ -350,6 +376,9 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             attributes["reported_fan_speed"] = reported_fan_speed
             # Keep the original attribute for existing dashboards and templates.
             attributes["current_fan_speed"] = reported_fan_speed
+        active_alerts = normalize_alerts(self._details.get(frigidaire.Detail.ALERTS))
+        if active_alerts is not None:
+            attributes["active_alerts"] = active_alerts
         return attributes
 
     def set_temperature(self, **kwargs):
@@ -386,7 +415,9 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         else:
             if hvac_mode not in HA_TO_FRIGIDAIRE_HVAC_MODE:
                 return
-            if _normalize_enum_value(self._details.get(frigidaire.Detail.MODE)) == frigidaire.Mode.OFF:
+            appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
+            frigidaire_mode = _normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
+            if appliance_state == frigidaire.ApplianceState.OFF or frigidaire_mode == frigidaire.Mode.OFF:
                 self._client.execute_action(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
                 # temperature reverts to default when the device is turned on
                 current_temp = self.target_temperature
@@ -410,4 +441,5 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         """Drop stale optimistic values once the command window has elapsed."""
         if not self._is_optimistic():
             self._clear_optimistic()
+        self._update_swing_support()
         super()._handle_coordinator_update()
