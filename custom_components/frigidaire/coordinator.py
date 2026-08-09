@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
+from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -20,6 +21,13 @@ _LOGGER = logging.getLogger(__name__)
 # is what trips Frigidaire's active-session cap (cas_3403).
 BASE_INTERVAL = timedelta(seconds=30)
 MAX_INTERVAL = timedelta(minutes=10)
+FAN_SPEED_STATE_KEY = "fanSpeedState"
+
+
+def _normalize(value: Any) -> Any:
+    if isinstance(value, str):
+        return value.upper()
+    return value
 
 
 class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
@@ -40,6 +48,19 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
         self.client = client
         self.appliance = appliance
         self._failure_count = 0
+
+    @property
+    def reported_fan_speed(self) -> str | None:
+        """Return the reported fan-speed state without implying motion."""
+        raw = (self.data or {}).get(FAN_SPEED_STATE_KEY)
+        if raw is None:
+            return None
+        return {
+            frigidaire.FanSpeed.AUTO: "auto",
+            frigidaire.FanSpeed.LOW: "low",
+            frigidaire.FanSpeed.MEDIUM: "medium",
+            frigidaire.FanSpeed.HIGH: "high",
+        }.get(_normalize(raw), str(raw).lower())
 
     async def _async_update_data(self) -> dict:
         """Fetch the latest appliance details, backing off on repeated failures."""

@@ -32,6 +32,7 @@ import frigidaire
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
+from .diagnostics import filter_needs_attention, normalize_alerts
 from .helpers import suggest_area
 
 _LOGGER = logging.getLogger(__name__)
@@ -228,6 +229,15 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         self._optimistic_swing_mode = None
 
     @property
+    def reported_fan_speed(self) -> str | None:
+        """Return the appliance's reported fan-speed state.
+
+        This can resolve an AUTO setting to a concrete level, but it may retain
+        the last value while the appliance is off and is not running telemetry.
+        """
+        return self.coordinator.reported_fan_speed
+
+    @property
     def temperature_unit(self):
         """Return the unit of measurement which this thermostat uses."""
         unit = _normalize_enum_value(self._details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION))
@@ -358,9 +368,18 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
-        return {
-            "check_filter": bool(_normalize_enum_value(self._details.get(frigidaire.Detail.FILTER_STATE)) == "CHANGE"),
+        attributes: dict[str, Any] = {
+            "check_filter": filter_needs_attention(self._details.get(frigidaire.Detail.FILTER_STATE)) or False,
         }
+        reported_fan_speed = self.reported_fan_speed
+        if reported_fan_speed is not None:
+            attributes["reported_fan_speed"] = reported_fan_speed
+            # Keep the original attribute for existing dashboards and templates.
+            attributes["current_fan_speed"] = reported_fan_speed
+        active_alerts = normalize_alerts(self._details.get(frigidaire.Detail.ALERTS))
+        if active_alerts is not None:
+            attributes["active_alerts"] = active_alerts
+        return attributes
 
     def set_temperature(self, **kwargs):
         """Set new target temperature."""

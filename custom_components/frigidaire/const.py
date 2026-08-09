@@ -10,7 +10,14 @@ SWITCH_OPTIONS: dict[str, str] = {
     "ui_lock": "Child Lock",
 }
 
-# Keys must match binary sensor keys in binary_sensor.py
+# Keys must match diagnostic entity keys.
+CONF_CHECK_FILTER_SENSOR = "check_filter"
+CONF_FILTER_RUNTIME_SENSOR = "filter_runtime"
+
 BINARY_SENSOR_OPTIONS: dict[str, str] = {
-    "check_filter": "Check Filter",
+    CONF_CHECK_FILTER_SENSOR: "Check Filter",
+}
+
+SENSOR_OPTIONS: dict[str, str] = {
+    CONF_FILTER_RUNTIME_SENSOR: "Filter Runtime",
 }

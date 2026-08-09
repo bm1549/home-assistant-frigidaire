@@ -27,6 +27,7 @@ import frigidaire
 
 from .const import DOMAIN
 from .coordinator import FrigidaireApplianceCoordinator
+from .diagnostics import filter_needs_attention, normalize_alerts
 from .helpers import suggest_area
 
 _LOGGER = logging.getLogger(__name__)
@@ -172,23 +173,16 @@ class FrigidaireDehumidifier(CoordinatorEntity[FrigidaireApplianceCoordinator], 
 
         attrib = {
             "current_humidity": self._details.get(frigidaire.Detail.SENSOR_HUMIDITY),
-            "check_filter": bool(
-                _normalize_enum_value(self._details.get(frigidaire.Detail.FILTER_STATE)) != frigidaire.FilterState.GOOD
-            ),
+            "check_filter": filter_needs_attention(self._details.get(frigidaire.Detail.FILTER_STATE)) or False,
             "fan_mode": FRIGIDAIRE_TO_HA_FAN_MODE.get(fan_speed),
         }
 
         # The following attributes only exist on some models of dehumidifier
         bin_full = False
-        alerts = self._details.get(frigidaire.Detail.ALERTS)
+        alerts = normalize_alerts(self._details.get(frigidaire.Detail.ALERTS))
         if alerts is not None:
-            # 1) Old approach
-            if frigidaire.Alert.BUCKET_FULL in alerts:
-                bin_full = True
-
-            # 2) New approach
-            if any(alert.get("code") == "BUCKET_FULL" for alert in alerts):
-                bin_full = True
+            attrib["active_alerts"] = alerts
+            bin_full = "BUCKET_FULL" in alerts
 
         # Fallback to waterBucketLevel if alert is not set
         if not bin_full:

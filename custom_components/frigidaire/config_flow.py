@@ -15,13 +15,18 @@ from homeassistant.exceptions import HomeAssistantError
 import frigidaire
 
 from .auth_store import AUTH_FILE, load_auth, save_auth
-from .const import BINARY_SENSOR_OPTIONS, DOMAIN, SWITCH_OPTIONS
+from .const import (
+    BINARY_SENSOR_OPTIONS,
+    DOMAIN,
+    SENSOR_OPTIONS,
+    SWITCH_OPTIONS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema({"username": str, "password": str})
 
-ALL_OPTIONS = {**SWITCH_OPTIONS, **BINARY_SENSOR_OPTIONS}
+ALL_OPTIONS = {**SWITCH_OPTIONS, **BINARY_SENSOR_OPTIONS, **SENSOR_OPTIONS}
 
 
 def _device_schema(current: dict) -> vol.Schema:
@@ -153,7 +158,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         current = self._options.get(appliance.appliance_id, {})
 
         if user_input is not None:
-            self._options[appliance.appliance_id] = user_input
+            self._options[appliance.appliance_id] = {**current, **user_input}
             self._pending_appliances.pop(0)
             return await self._async_next_device_step()
 

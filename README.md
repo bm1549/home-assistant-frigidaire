@@ -23,7 +23,8 @@ A Home Assistant integration for Frigidaire WiFi-connected appliances, using the
 - Preset modes: Sleep
 - Swing modes: Vertical, Off
 - ON/OFF timer control (30-minute increments, up to 24 hours)
-- Extra state attributes: `check_filter` (also available as an optional binary sensor)
+- Extra state attributes: `check_filter`, `reported_fan_speed`, and `active_alerts`;
+	the legacy `current_fan_speed` alias is retained for existing templates
 
 ### Dehumidifier
 
@@ -41,9 +42,11 @@ During setup — or at any time via **Configure** — you can enable additional 
 | Ionizer (Clean Air Mode) | Switch | Toggles the ionizer/clean air feature |
 | Display Light | Switch | Toggles the unit's display panel light |
 | Child Lock | Switch | Locks the physical controls on the unit |
-| Check Filter | Binary sensor | On when the filter needs cleaning or replacement |
+| Check Filter | Problem binary sensor | On for `CLEAN`, `CHANGE`, or `BUY`; exposes `filter_state` for notification automations |
+| Filter Runtime | Duration sensor | Cumulative filter runtime reported by the appliance in native seconds; Home Assistant handles display-unit conversion |
 
 Each device is configured independently, so a home with both an AC and a dehumidifier can have different entities enabled for each.
+Filter runtime and the raw diagnostic attributes reuse the appliance platform's normal cloud response and do not add API polling.
 
 ## Installing
 
