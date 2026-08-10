@@ -283,6 +283,8 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         # collapsing everything to COOLING.
         if mode == HVACMode.FAN_ONLY:
             return HVACAction.FAN
+        if self.coordinator.compressor_estimation_enabled and self.coordinator.compressor_running is False:
+            return HVACAction.IDLE
         if mode == HVACMode.DRY:
             return HVACAction.DRYING
         return HVACAction.COOLING
