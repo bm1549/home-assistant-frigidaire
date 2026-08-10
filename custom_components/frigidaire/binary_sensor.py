@@ -30,16 +30,62 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     appliances: list[frigidaire.Appliance] = hass.data[DOMAIN][entry.entry_id]["appliances"]
     options: dict[str, dict[str, bool]] = entry.options
 
-    if not options:
-        return
-
+    # Connectivity is meaningful for every appliance and needs no per-device opt-in, so
+    # unlike the check-filter sensor it has no key in const.BINARY_SENSOR_OPTIONS — and it
+    # is created even when the entry has no options set at all.
     entities: list[BinarySensorEntity] = [
+        FrigidaireConnectivitySensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
+        for appliance in appliances
+        if coordinators[appliance.appliance_id].connection_state is not None
+    ]
+
+    entities += [
         FrigidaireCheckFilterSensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
         for appliance in appliances
         if options.get(appliance.appliance_id, {}).get(CONF_CHECK_FILTER_SENSOR, False)
     ]
 
     async_add_entities(entities)
+
+
+class FrigidaireConnectivitySensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
+    """Binary sensor that is ON while the cloud reports the appliance as connected.
+
+    This distinguishes a genuinely offline appliance from one whose reported values have
+    simply gone stale — the rest of the integration cannot tell the difference, because a
+    disconnected appliance keeps returning its last-known reported properties.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None) -> None:
+        super().__init__(coordinator)
+        self._appliance = coordinator.appliance
+        self._attr_unique_id = f"{self._appliance.appliance_id}_connectivity"
+        self._attr_name = "Connectivity"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._appliance.appliance_id)},
+            name=self._appliance.nickname,
+            manufacturer="Frigidaire",
+            suggested_area=suggested_area,
+        )
+
+    @property
+    def available(self) -> bool:
+        # Deliberately not gated on super().available: when a poll fails, whether the
+        # appliance is reachable is exactly what the user wants to see, so report the last
+        # known connection state rather than going unavailable alongside everything else.
+        return self.coordinator.is_connected is not None
+
+    @property
+    def extra_state_attributes(self) -> Mapping[str, Any] | None:
+        state = self.coordinator.connection_state
+        return None if state is None else {"connection_state": state}
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator.is_connected
 
 
 class FrigidaireCheckFilterSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):

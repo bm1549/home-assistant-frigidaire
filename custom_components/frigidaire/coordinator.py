@@ -22,6 +22,10 @@ _LOGGER = logging.getLogger(__name__)
 BASE_INTERVAL = timedelta(seconds=30)
 MAX_INTERVAL = timedelta(minutes=10)
 FAN_SPEED_STATE_KEY = "fanSpeedState"
+# Reported by the cloud as a sibling of "properties", so it never appears in the
+# properties.reported dict that becomes coordinator.data.
+CONNECTION_STATE_KEY = "connectionState"
+CONNECTED_STATE = "CONNECTED"
 
 
 def _normalize(value: Any) -> Any:
@@ -48,6 +52,23 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
         self.client = client
         self.appliance = appliance
         self._failure_count = 0
+        self._connection_state: str | None = None
+
+    @property
+    def connection_state(self) -> str | None:
+        """Return the appliance's normalized cloud connection state, if reported."""
+        return self._connection_state
+
+    @property
+    def is_connected(self) -> bool | None:
+        """Return whether the appliance is currently reachable by the cloud.
+
+        None when the appliance does not report a connection state at all, so callers can
+        omit the entity rather than inventing a value.
+        """
+        if self._connection_state is None:
+            return None
+        return self._connection_state == CONNECTED_STATE
 
     @property
     def reported_fan_speed(self) -> str | None:
@@ -65,7 +86,9 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
     async def _async_update_data(self) -> dict:
         """Fetch the latest appliance details, backing off on repeated failures."""
         try:
-            details = await self.hass.async_add_executor_job(self.client.get_appliance_details, self.appliance)
+            # Fetch the whole record rather than just properties.reported: connectionState
+            # is a sibling of "properties" and is dropped by get_appliance_details().
+            raw = await self.hass.async_add_executor_job(self.client.get_appliance_raw, self.appliance)
         except (frigidaire.FrigidaireException, ConnectionError) as err:
             self._failure_count += 1
             # 30s, 60s, 120s, 240s … capped at MAX_INTERVAL.
@@ -77,4 +100,8 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
         if self._failure_count:
             self._failure_count = 0
             self.update_interval = BASE_INTERVAL
-        return details
+
+        self._connection_state = _normalize(raw.get(CONNECTION_STATE_KEY))
+        # coordinator.data stays exactly the properties.reported dict that every platform
+        # already indexes with frigidaire.Detail keys.
+        return raw.get("properties", {}).get("reported", {})

@@ -25,6 +25,8 @@ A Home Assistant integration for Frigidaire WiFi-connected appliances, using the
 - ON/OFF timer control (30-minute increments, up to 24 hours)
 - Extra state attributes: `check_filter`, `reported_fan_speed`, and `active_alerts`;
 	the legacy `current_fan_speed` alias is retained for existing templates
+- `hvac_action` reflects the mode the appliance reports it is *actually* running, so an
+	Eco/Auto unit shows `cooling` vs `fan` as it cycles rather than the requested mode
 
 ### Dehumidifier
 
@@ -32,6 +34,23 @@ A Home Assistant integration for Frigidaire WiFi-connected appliances, using the
 - Target humidity control (35-85%, 5% steps)
 - Fan speed control via the `frigidaire.set_fan_mode` service: `low`, `medium`, `high`
 - Extra state attributes: `current_humidity`, `check_filter`, `fan_mode`, `bin_full`
+
+### Automatic Entities
+
+These are created automatically, but only for appliances that actually report the
+underlying value — no extra API polling is involved, since all of it arrives in the same
+cloud response the climate and dehumidifier entities already use.
+
+| Entity | Type | Description |
+|---|---|---|
+| Humidity | Humidity sensor | Room relative humidity, on appliances with a humidity sensor (including some ACs) |
+| PM2.5 | PM2.5 sensor | Particulate concentration in µg/m³, on appliances with an air-quality sensor |
+| Wi-Fi Signal | Signal strength sensor | RSSI in dBm plus a `link_quality` attribute. Diagnostic and **disabled by default** — enable it from the device page when troubleshooting |
+| Connectivity | Connectivity binary sensor | Whether the cloud can currently reach the appliance. Worth alerting on: a disconnected appliance keeps serving its last-known values, so every other entity looks healthy while its data silently goes stale |
+
+`pm10` is deliberately **not** exposed. On the appliances observed so far it alternates
+between a fixed placeholder value and a value identical to `pm25`, so it carries no
+information `pm25` does not already provide.
 
 ### Optional Entities
 

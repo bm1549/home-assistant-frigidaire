@@ -71,6 +71,16 @@ FRIGIDAIRE_TO_HA_MODE = {
     frigidaire.Mode.DRY: HVACMode.DRY,
 }
 
+# Detail.MODE_STATE is the mode the appliance reports it is actually running, as opposed to
+# Detail.MODE which is what was requested. Only the concrete running modes are mapped:
+# anything else (ECO, AUTO, SMART) is a setting rather than an activity and falls through to
+# the mode-derived fallback in hvac_action.
+FRIGIDAIRE_MODE_STATE_TO_HA_ACTION = {
+    frigidaire.Mode.COOL: HVACAction.COOLING,
+    frigidaire.Mode.FAN: HVACAction.FAN,
+    frigidaire.Mode.DRY: HVACAction.DRYING,
+}
+
 FRIGIDAIRE_TO_HA_FAN_SPEED = {
     frigidaire.FanSpeed.AUTO: FAN_AUTO,
     frigidaire.FanSpeed.LOW: FAN_LOW,
@@ -279,8 +289,20 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
         if appliance_state != frigidaire.ApplianceState.RUNNING:
             return HVACAction.IDLE
-        # Running — report the action that matches the active mode rather than
-        # collapsing everything to COOLING.
+
+        # Prefer the appliance's reported modeState over the requested mode. In ECO/AUTO the
+        # requested mode says nothing about what the unit is doing right now, so this is the
+        # only way to distinguish actually cooling from just running the fan. Note that
+        # hvac_mode deliberately stays on the requested mode — that is the user's selection
+        # and must not flap as the compressor cycles.
+        mode_state = FRIGIDAIRE_MODE_STATE_TO_HA_ACTION.get(
+            _normalize_enum_value(self._details.get(frigidaire.Detail.MODE_STATE))
+        )
+        if mode_state is not None:
+            return mode_state
+
+        # No modeState reported — fall back to the action implied by the active mode rather
+        # than collapsing everything to COOLING.
         if mode == HVACMode.FAN_ONLY:
             return HVACAction.FAN
         if mode == HVACMode.DRY:

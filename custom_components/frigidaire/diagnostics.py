@@ -46,3 +46,54 @@ def filter_runtime_seconds(value: Any) -> float | None:
     if not math.isfinite(seconds) or seconds < 0:
         return None
     return seconds
+
+
+def _finite_float(value: Any) -> float | None:
+    """Coerce to a finite float, or None if the value is missing or unparseable."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def humidity_percent(value: Any) -> float | None:
+    """Return a reported relative-humidity reading, or None if out of range."""
+    humidity = _finite_float(value)
+    if humidity is None or not 0 <= humidity <= 100:
+        return None
+    return humidity
+
+
+def particulate_matter(value: Any) -> float | None:
+    """Return a reported particulate concentration in ug/m3, or None if implausible."""
+    concentration = _finite_float(value)
+    if concentration is None or concentration < 0:
+        return None
+    return concentration
+
+
+def network_rssi(value: Any) -> float | None:
+    """Return the RSSI from a reported networkInterface mapping.
+
+    Appliances report signal strength nested under networkInterface rather than as a
+    top-level key, and omit the mapping entirely when they have never reported Wi-Fi
+    telemetry. A non-negative RSSI is rejected: real dBm readings here are always negative,
+    so 0 or above means the field is a placeholder rather than a measurement.
+    """
+    if not isinstance(value, Mapping):
+        return None
+    rssi = _finite_float(value.get("rssi"))
+    if rssi is None or rssi >= 0:
+        return None
+    return rssi
+
+
+def link_quality(value: Any) -> str | None:
+    """Return the normalized link-quality indicator from a networkInterface mapping."""
+    if not isinstance(value, Mapping):
+        return None
+    indicator = value.get("linkQualityIndicator")
+    if indicator is None:
+        return None
+    return str(indicator).upper()
