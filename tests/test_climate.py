@@ -47,24 +47,26 @@ async def test_powered_off_unit_reports_off(hass: HomeAssistant, setup_entry) ->
     assert state.attributes["hvac_action"] == "off"
 
 
-async def test_set_hvac_mode_on_running_unit_sends_only_mode(hass: HomeAssistant, setup_entry) -> None:
+async def test_set_hvac_mode_on_running_unit_always_sends_power_then_mode(hass: HomeAssistant, setup_entry) -> None:
+    """The cloud reports desired state, so RUNNING may be stale; power-on must not be skipped."""
     _entry, stub = await setup_entry([LEGACY_AC])
 
     await set_hvac_mode(hass, climate_id(hass), "fan_only")
 
-    assert stub.commands == [("mode", frigidaire.Mode.FAN)]
+    assert stub.commands == [("executeCommand", frigidaire.Power.ON), ("mode", frigidaire.Mode.FAN)]
 
 
-async def test_set_hvac_mode_from_off_sends_power_temperature_then_mode(hass: HomeAssistant, setup_entry) -> None:
+async def test_set_hvac_mode_from_off_sends_power_mode_then_setpoint(hass: HomeAssistant, setup_entry) -> None:
+    """The setpoint goes last: engaging the mode restores the appliance default and wipes an earlier value."""
     _entry, stub = await setup_entry([OFF_AC])
 
     await set_hvac_mode(hass, climate_id(hass), "cool")
 
     assert stub.commands == [
         ("executeCommand", frigidaire.Power.ON),
+        ("mode", frigidaire.Mode.COOL),
         ("temperatureRepresentation", frigidaire.Unit.FAHRENHEIT),
         ("targetTemperatureF", 72),
-        ("mode", frigidaire.Mode.COOL),
     ]
 
 

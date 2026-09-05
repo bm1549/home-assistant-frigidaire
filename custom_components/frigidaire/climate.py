@@ -417,9 +417,22 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
                 return
             appliance_state = _normalize_enum_value(self._details.get(frigidaire.Detail.APPLIANCE_STATE))
             frigidaire_mode = _normalize_enum_value(self._details.get(frigidaire.Detail.MODE))
-            if appliance_state == frigidaire.ApplianceState.OFF or frigidaire_mode == frigidaire.Mode.OFF:
-                self._client.execute_action(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
-                # temperature reverts to default when the device is turned on
+            was_off = appliance_state == frigidaire.ApplianceState.OFF or frigidaire_mode == frigidaire.Mode.OFF
+            _LOGGER.debug(
+                "Turn-on requested; cloud reports appliance_state=%s mode=%s", appliance_state, frigidaire_mode
+            )
+            # Always send power-on. The cloud reports the DESIRED state, not the hardware
+            # state: after a single failed turn-on it keeps reporting RUNNING, so gating
+            # set_power on it skips the power command on every retry and the unit never
+            # starts. Power is a set (ON/OFF), not a toggle, so this is harmless on a unit
+            # that really is running.
+            self._client.execute_action(self._appliance, frigidaire.Action.set_power(frigidaire.Power.ON))
+            self._client.execute_action(
+                self._appliance, frigidaire.Action.set_mode(HA_TO_FRIGIDAIRE_HVAC_MODE[hvac_mode])
+            )
+            if was_off:
+                # The appliance forgets its setpoint when powered on, and engaging the mode
+                # restores that default, so the remembered setpoint must be re-sent last.
                 current_temp = self.target_temperature
                 if current_temp is not None:
                     self._client.execute_action(
@@ -428,9 +441,6 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
                             int(current_temp), HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]
                         ),
                     )
-            self._client.execute_action(
-                self._appliance, frigidaire.Action.set_mode(HA_TO_FRIGIDAIRE_HVAC_MODE[hvac_mode])
-            )
 
         self._optimistic_hvac_mode = hvac_mode
         self._set_optimistic_window()
