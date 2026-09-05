@@ -1,2 +1,2 @@
 pytest-homeassistant-custom-component==0.13.357
-frigidaire==0.18.50
+frigidaire==0.18.52
