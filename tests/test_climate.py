@@ -88,4 +88,4 @@ async def test_failed_poll_marks_climate_unavailable_and_logs(
     await hass.async_block_till_done()
 
     assert hass.states.get(climate_id(hass)).state == "unavailable"
-    assert "Error communicating with Frigidaire" in caplog.text
+    assert "Error communicating with Frigidaire (status=429, error=cas_3403)" in caplog.text

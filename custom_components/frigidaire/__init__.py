@@ -60,8 +60,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except frigidaire.FrigidaireException as err:
             # Handle frigidaire's active-session cap (cas_3403) gracefully. Raise
             # ConfigEntryNotReady so HA retries setup automatically rather than
-            # aborting — AbortFlow is only valid inside a config flow, not here.
-            if "cas_3403" in str(err):
+            # aborting. The library redacts response bodies from the message, so the
+            # platform error code is only available structurally on the exception.
+            if getattr(err, "error_code", None) == "cas_3403":
                 raise ConfigEntryNotReady("Rate limited by Frigidaire. Will retry automatically.") from err
             raise ConfigEntryNotReady(f"Frigidaire error during setup: {err}") from err
 
