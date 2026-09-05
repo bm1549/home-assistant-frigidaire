@@ -25,6 +25,18 @@ async def test_bucket_sensor_is_on_when_alert_reported(hass: HomeAssistant, setu
     assert hass.states.get(bucket_sensor_id(hass)).state == "on"
 
 
+async def test_bucket_sensor_is_on_when_level_reported_full(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(DEHUMIDIFIER, waterBucketLevel=1)], options=BUCKET_ENABLED)
+
+    assert hass.states.get(bucket_sensor_id(hass)).state == "on"
+
+
+async def test_bucket_sensor_is_on_when_tank_full_reported(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(DEHUMIDIFIER, waterTankFull="YES")], options=BUCKET_ENABLED)
+
+    assert hass.states.get(bucket_sensor_id(hass)).state == "on"
+
+
 async def test_bucket_sensor_unavailable_when_model_reports_no_bucket_signal(hass: HomeAssistant, setup_entry) -> None:
     record = with_reported(DEHUMIDIFIER)
     for key in ("alerts", "waterBucketLevel"):
