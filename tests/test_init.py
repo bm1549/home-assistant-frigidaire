@@ -35,6 +35,7 @@ async def test_dehumidifier_reporting_temperature_gets_temperature_sensor(hass: 
 
 async def test_unload_entry_cleans_up(hass: HomeAssistant, setup_entry) -> None:
     entry, _stub = await setup_entry([LEGACY_AC])
+    assert entry.state is ConfigEntryState.LOADED
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()

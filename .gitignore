@@ -5,3 +5,5 @@ __pycache__/
 .DS_Store
 .venv/
 .superpowers/
+.pytest_cache/
+.ruff_cache/
