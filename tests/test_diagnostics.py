@@ -4,6 +4,7 @@ import math
 
 import pytest
 from diagnostics import (
+    bucket_is_full,
     filter_needs_attention,
     filter_runtime_seconds,
     normalize_alerts,
@@ -57,3 +58,21 @@ def test_normalize_alerts(alerts, expected):
 )
 def test_filter_runtime_seconds(seconds, expected):
     assert filter_runtime_seconds(seconds) == expected
+
+
+@pytest.mark.parametrize(
+    ("alerts", "water_bucket_level", "water_tank_full", "expected"),
+    [
+        (None, None, None, None),
+        ([], None, None, False),
+        (["BUCKET_FULL"], None, None, True),
+        (["FILTER"], 0, None, False),
+        (None, 1, None, True),
+        (None, 0, "NO", False),
+        (None, None, "yes", True),
+        (None, None, True, True),
+        (None, None, False, False),
+    ],
+)
+def test_bucket_is_full(alerts, water_bucket_level, water_tank_full, expected):
+    assert bucket_is_full(alerts, water_bucket_level, water_tank_full) is expected
