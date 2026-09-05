@@ -8,6 +8,7 @@ on:
       - "tests/**"
       - ".github/**"
       - "docs/**"
+      - "README.md"
       - "requirements_test.txt"
       - "pyproject.toml"
       - ".gitignore"

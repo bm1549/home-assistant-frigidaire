@@ -60,3 +60,19 @@ async def test_session_cap_during_setup_reports_rate_limit(hass: HomeAssistant, 
 
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert entry.reason == "Rate limited by Frigidaire. Will retry automatically."
+
+
+async def test_other_api_failure_during_setup_reports_status(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+    hass.config.config_dir = str(tmp_path)
+    stub = frigidaire_stub([LEGACY_AC])
+    stub.appliances_error = frigidaire.FrigidaireException("Request failed", status_code=503)
+    entry = MockConfigEntry(
+        domain=DOMAIN, data={"username": "user@example.com", "password": "secret"}, unique_id="user@example.com"
+    )
+    entry.add_to_hass(hass)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert entry.reason == "Frigidaire error during setup (status=503): Request failed"
