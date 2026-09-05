@@ -433,6 +433,10 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
             if was_off:
                 # The appliance forgets its setpoint when powered on, and engaging the mode
                 # restores that default, so the remembered setpoint must be re-sent last.
+                # On the stale-RUNNING retry path the cloud still says RUNNING, so was_off is
+                # False and the setpoint is deliberately not re-sent; the next poll picks up the
+                # appliance's default instead, which is the trade-off for not doubling write
+                # traffic on every mode change.
                 current_temp = self.target_temperature
                 if current_temp is not None:
                     self._client.execute_action(
