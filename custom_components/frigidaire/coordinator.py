@@ -94,7 +94,9 @@ class FrigidaireAccountCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         except (frigidaire.FrigidaireException, ConnectionError) as err:
             self._failure_count += 1
             # 30s, 60s, 120s, 240s … capped at MAX_INTERVAL.
-            backoff = BASE_INTERVAL * (2 ** (self._failure_count - 1))
+            # The exponent is capped so timedelta can't overflow after a very long outage;
+            # anything past a few doublings is clamped to MAX_INTERVAL anyway.
+            backoff = BASE_INTERVAL * (2 ** min(self._failure_count - 1, 20))
             self.update_interval = min(backoff, MAX_INTERVAL)
             raise UpdateFailed(f"Error communicating with Frigidaire{_error_context(err)}: {err}") from err
 
@@ -108,6 +110,13 @@ class FrigidaireAccountCoordinator(DataUpdateCoordinator[dict[str, dict]]):
     def push_to_appliances(self) -> None:
         """Listener: hand each appliance coordinator its record, or the shared failure."""
         for coordinator in self.appliance_coordinators:
+            # The coordinator that asked for this refresh applies the record itself (and
+            # raises on failure) once the await returns. Pushing to it here would call
+            # async_set_updated_data mid-refresh, whose _debounced_refresh.async_cancel()
+            # silently drops any refresh queued after that refresh began — a script that
+            # sets hvac_mode and then temperature would lose the second command's refresh.
+            if coordinator.refreshing_self:
+                continue
             if not self.last_update_success:
                 coordinator.async_set_update_error(self.last_exception or UpdateFailed("Account fetch failed"))
                 continue
@@ -119,9 +128,14 @@ class FrigidaireAccountCoordinator(DataUpdateCoordinator[dict[str, dict]]):
                 continue
             try:
                 data = coordinator.apply_record(record)
-            except UpdateFailed as err:
-                # One malformed record must not take down the other appliances.
-                coordinator.async_set_update_error(err)
+            except Exception as err:
+                # Deliberately broad: one malformed record must never abort the loop and
+                # leave the remaining appliances without their update.
+                coordinator.async_set_update_error(
+                    err
+                    if isinstance(err, UpdateFailed)
+                    else UpdateFailed(f"Unexpected error applying record for {coordinator.appliance.nickname}: {err}")
+                )
                 continue
             coordinator.async_set_updated_data(data)
 
@@ -147,6 +161,9 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
         self.client = client
         self.appliance = appliance
         self.account = account
+        # True only while this coordinator is inside its own _async_update_data; the
+        # account's push skips it so it is not updated mid-refresh. See push_to_appliances.
+        self.refreshing_self = False
         account.appliance_coordinators.append(self)
         options = options or {}
         self._compressor_estimator = (
@@ -249,7 +266,11 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
 
     async def _async_update_data(self) -> dict:
         """Explicit refresh (an entity's force_refresh after a command): fetch the account now."""
-        await self.account.async_refresh()
+        self.refreshing_self = True
+        try:
+            await self.account.async_refresh()
+        finally:
+            self.refreshing_self = False
         if not self.account.last_update_success:
             raise UpdateFailed(str(self.account.last_exception))
         record = (self.account.data or {}).get(self.appliance.appliance_id)
