@@ -24,7 +24,7 @@ async def test_enabling_check_filter_creates_binary_sensor(hass: HomeAssistant, 
     # Second device (the dehumidifier): enable the filter sensor.
     result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={"check_filter": True})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert entry.options["DH-1"]["check_filter"] is True
     assert entry.options["AC-LEGACY-1"]["check_filter"] is False
@@ -62,6 +62,6 @@ async def test_air_conditioner_options_include_compressor_fields_and_serialize(
 
     result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
     assert entry.options["AC-LEGACY-1"]["cool_hysteresis"] == 1.5
     assert entry.options["AC-LEGACY-1"]["compressor_off_delay"] == 60

@@ -46,6 +46,6 @@ async def test_failed_poll_makes_connectivity_unavailable(hass: HomeAssistant, s
     stub.details_error = frigidaire.FrigidaireException("Request failed", status_code=503)
 
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert hass.states.get(connectivity_id(hass)).state == "unavailable"

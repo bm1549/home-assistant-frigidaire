@@ -49,7 +49,7 @@ async def test_unload_entry_cleans_up(hass: HomeAssistant, setup_entry) -> None:
     assert entry.state is ConfigEntryState.LOADED
 
     assert await hass.config_entries.async_unload(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert entry.state is ConfigEntryState.NOT_LOADED
     assert entry.entry_id not in hass.data.get(DOMAIN, {})
@@ -65,7 +65,7 @@ async def test_session_cap_during_setup_reports_rate_limit(hass: HomeAssistant, 
     entry.add_to_hass(hass)
 
     assert not await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert entry.reason == "Rate limited by Frigidaire. Will retry automatically."
@@ -81,7 +81,7 @@ async def test_other_api_failure_during_setup_reports_status(hass: HomeAssistant
     entry.add_to_hass(hass)
 
     assert not await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert entry.reason == "Frigidaire error during setup (status=503): Request failed"
@@ -100,7 +100,7 @@ async def test_record_without_properties_fails_the_poll(
     del stub.records["AC-LEGACY-1"]["properties"]
 
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert hass.states.get(entity_id_for(hass, "climate", "AC-LEGACY-1")).state == "unavailable"
     assert "no reported properties" in caplog.text
