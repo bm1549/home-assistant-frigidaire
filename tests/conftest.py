@@ -43,6 +43,7 @@ class StubFrigidaire:
         self.commands: list[tuple[str, object]] = []
         self.details_error: Exception | None = None
         self.appliances_error: Exception | None = None
+        self.raw_fetch_count = 0
 
     def get_appliances(self) -> list[frigidaire.Appliance]:
         if self.appliances_error is not None:
@@ -58,6 +59,12 @@ class StubFrigidaire:
         if self.details_error is not None:
             raise self.details_error
         return self.records[appliance.appliance_id]
+
+    def get_appliances_raw(self) -> list[dict]:
+        self.raw_fetch_count += 1
+        if self.details_error is not None:
+            raise self.details_error
+        return [copy.deepcopy(record) for record in self.records.values()]
 
     def execute_action(self, appliance: frigidaire.Appliance, action: list[frigidaire.Component]) -> None:
         self.commands.extend((component.name, component.value) for component in action)
