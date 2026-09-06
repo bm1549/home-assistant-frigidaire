@@ -44,6 +44,25 @@ async def test_room_below_target_estimates_idle_after_off_delay(hass: HomeAssist
     assert climate_state(hass, "AC-LEGACY-1").attributes["hvac_action"] == "idle"
 
 
+async def test_fan_only_beats_estimate(hass: HomeAssistant, setup_entry) -> None:
+    """FAN_ONLY is checked before the estimate, so fan mode never reports idle."""
+    await setup_entry([with_reported(LEGACY_AC, mode="FANONLY", ambientTemperatureF=70)], options=ESTIMATE_ON)
+
+    assert hass.states.get(estimate_id(hass, "AC-LEGACY-1")).state == "off"
+    assert climate_state(hass, "AC-LEGACY-1").attributes["hvac_action"] == "fan"
+
+
+async def test_estimate_beats_dry(hass: HomeAssistant, setup_entry) -> None:
+    """The estimate is checked before DRY, so a satisfied dry cycle reports idle, not drying."""
+    await setup_entry([with_reported(LEGACY_AC, mode="DRY", ambientTemperatureF=70)], options=ESTIMATE_ON)
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
+    await hass.async_block_till_done()
+
+    assert hass.states.get(estimate_id(hass, "AC-LEGACY-1")).state == "off"
+    assert climate_state(hass, "AC-LEGACY-1").attributes["hvac_action"] == "idle"
+
+
 async def test_reported_mode_state_beats_estimate(hass: HomeAssistant, setup_entry) -> None:
     options = {"AC-TELICA-1": {"compressor": True, "cool_hysteresis": 0.0, "compressor_off_delay": 0}}
     await setup_entry(

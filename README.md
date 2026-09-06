@@ -77,9 +77,10 @@ temperature. It does not use `fanSpeedState`, which can retain its last value wh
 
 The option is disabled by default. While disabled, `hvac_action` retains the integration's standard behavior. While enabled,
 the same coordinator-owned estimate changes `hvac_action` from cooling or drying to idle after the configured temperature
-deadband and off delay are satisfied. Above the upper deadband boundary the estimate is running, below the lower boundary
-the off-delay timer runs, and between the boundaries the previous estimate is retained. It reuses the normal coordinator
-response and does not add cloud polling.
+deadband and off delay are satisfied. On appliances that report `modeState`, that real telemetry is used for `hvac_action`
+instead and enabling the option only adds the Compressor Estimate sensor. Above the upper deadband boundary the estimate
+is running, below the lower boundary the off-delay timer runs, and between the boundaries the previous estimate is
+retained. It reuses the normal coordinator response and does not add cloud polling.
 
 If a standalone threshold signal is sufficient and changing `hvac_action` is not needed, Home Assistant's Threshold helper
 and a template binary sensor with `delay_off` can implement that externally instead. Helpers create separate entities; they
