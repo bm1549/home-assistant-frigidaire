@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 import frigidaire
@@ -24,12 +24,13 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# A single shared poll per appliance replaces the old per-entity polling: a
-# device that exposes several entities (climate/switch/number/binary_sensor/…)
-# now hits the API once per cycle instead of once per entity. On failure we back
-# off exponentially up to MAX_INTERVAL so that when Frigidaire's auth servers are
-# flaky (upstream Gigya/token outages) we stop hammering them — repeated re-auth
-# is what trips Frigidaire's active-session cap (cas_3403).
+# A single account-level poll replaces the old per-appliance polling, which had
+# itself replaced per-entity polling: the whole account is fetched once per cycle
+# and each appliance's record is pushed to its own coordinator, so an account with
+# N appliances makes one request per cycle instead of N identical ones. On failure
+# we back off exponentially up to MAX_INTERVAL so that when Frigidaire's auth
+# servers are flaky (upstream Gigya/token outages) we stop hammering them —
+# repeated re-auth is what trips Frigidaire's active-session cap (cas_3403).
 BASE_INTERVAL = timedelta(seconds=30)
 MAX_INTERVAL = timedelta(minutes=10)
 FAN_SPEED_STATE_KEY = "fanSpeedState"
@@ -69,25 +70,84 @@ def _error_context(err: Exception) -> str:
     return f" ({', '.join(parts)})" if parts else ""
 
 
+class FrigidaireAccountCoordinator(DataUpdateCoordinator[dict[str, dict]]):
+    """Polls the whole account in one request and pushes each record to its appliance coordinator.
+
+    Before this, every appliance coordinator fetched the full appliance list on its own
+    30-second timer, so N appliances meant N identical requests per cycle and N
+    independent re-authentications when one failed, which is what tripped Frigidaire's
+    session cap (issue #146). Now only this coordinator polls; the per-appliance
+    coordinators receive their slice through push_to_appliances() and fetch on their
+    own only when an entity asks for an immediate refresh after a command.
+    """
+
+    def __init__(self, hass: HomeAssistant, client: frigidaire.Frigidaire) -> None:
+        super().__init__(hass, _LOGGER, name="frigidaire account", update_interval=BASE_INTERVAL)
+        self.client = client
+        self.appliance_coordinators: list[FrigidaireApplianceCoordinator] = []
+        self._failure_count = 0
+
+    async def _async_update_data(self) -> dict[str, dict]:
+        """Fetch every appliance record, backing off on repeated failures."""
+        try:
+            records = await self.hass.async_add_executor_job(self.client.get_appliances_raw)
+        except (frigidaire.FrigidaireException, ConnectionError) as err:
+            self._failure_count += 1
+            # 30s, 60s, 120s, 240s … capped at MAX_INTERVAL.
+            backoff = BASE_INTERVAL * (2 ** (self._failure_count - 1))
+            self.update_interval = min(backoff, MAX_INTERVAL)
+            raise UpdateFailed(f"Error communicating with Frigidaire{_error_context(err)}: {err}") from err
+
+        # Recovered — resume the normal polling cadence.
+        if self._failure_count:
+            self._failure_count = 0
+            self.update_interval = BASE_INTERVAL
+        return {record["applianceId"]: record for record in records}
+
+    @callback
+    def push_to_appliances(self) -> None:
+        """Listener: hand each appliance coordinator its record, or the shared failure."""
+        for coordinator in self.appliance_coordinators:
+            if not self.last_update_success:
+                coordinator.async_set_update_error(self.last_exception or UpdateFailed("Account fetch failed"))
+                continue
+            record = (self.data or {}).get(coordinator.appliance.appliance_id)
+            if record is None:
+                coordinator.async_set_update_error(
+                    UpdateFailed(f"Appliance {coordinator.appliance.nickname} not found in list of appliances")
+                )
+                continue
+            try:
+                data = coordinator.apply_record(record)
+            except UpdateFailed as err:
+                # One malformed record must not take down the other appliances.
+                coordinator.async_set_update_error(err)
+                continue
+            coordinator.async_set_updated_data(data)
+
+
 class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
-    """Polls a single Frigidaire appliance and shares its details with every entity."""
+    """Shares one appliance's slice of the account fetch with every entity for that device."""
 
     def __init__(
         self,
         hass: HomeAssistant,
         client: frigidaire.Frigidaire,
         appliance: frigidaire.Appliance,
+        account: FrigidaireAccountCoordinator,
         options: Mapping[str, Any] | None = None,
     ) -> None:
+        # No update_interval: the account coordinator is the only thing that polls.
         super().__init__(
             hass,
             _LOGGER,
             name=f"frigidaire {appliance.nickname}",
-            update_interval=BASE_INTERVAL,
+            update_interval=None,
         )
         self.client = client
         self.appliance = appliance
-        self._failure_count = 0
+        self.account = account
+        account.appliance_coordinators.append(self)
         options = options or {}
         self._compressor_estimator = (
             CompressorEstimator(
@@ -172,29 +232,27 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
 
         self._compressor_running = self._compressor_estimator.update(current, target, now=time.monotonic())
 
-    async def _async_update_data(self) -> dict:
-        """Fetch the latest appliance details, backing off on repeated failures."""
-        try:
-            # Fetch the whole record rather than just properties.reported: connectionState
-            # is a sibling of "properties" and is dropped by get_appliance_details().
-            raw = await self.hass.async_add_executor_job(self.client.get_appliance_raw, self.appliance)
-        except (frigidaire.FrigidaireException, ConnectionError) as err:
-            self._failure_count += 1
-            # 30s, 60s, 120s, 240s … capped at MAX_INTERVAL.
-            backoff = BASE_INTERVAL * (2 ** (self._failure_count - 1))
-            self.update_interval = min(backoff, MAX_INTERVAL)
-            raise UpdateFailed(f"Error communicating with Frigidaire{_error_context(err)}: {err}") from err
+    def apply_record(self, record: dict) -> dict:
+        """Derive this appliance's coordinator data from its raw account record.
 
-        # Recovered — resume the normal polling cadence.
-        if self._failure_count:
-            self._failure_count = 0
-            self.update_interval = BASE_INTERVAL
-
-        self._connection_state = _normalize(raw.get(CONNECTION_STATE_KEY))
+        The whole record is used rather than just properties.reported: connectionState
+        is a sibling of "properties" and is dropped by get_appliance_details().
+        """
+        self._connection_state = _normalize(record.get(CONNECTION_STATE_KEY))
         # coordinator.data stays exactly the properties.reported dict that every platform
         # already indexes with frigidaire.Detail keys.
-        reported = (raw.get("properties") or {}).get("reported")
-        if not isinstance(reported, dict):
+        reported = (record.get("properties") or {}).get("reported")
+        if not isinstance(reported, dict) or not reported:
             raise UpdateFailed(f"Frigidaire returned no reported properties for {self.appliance.nickname}")
         self._update_compressor_estimate(reported)
         return reported
+
+    async def _async_update_data(self) -> dict:
+        """Explicit refresh (an entity's force_refresh after a command): fetch the account now."""
+        await self.account.async_refresh()
+        if not self.account.last_update_success:
+            raise UpdateFailed(str(self.account.last_exception))
+        record = (self.account.data or {}).get(self.appliance.appliance_id)
+        if record is None:
+            raise UpdateFailed(f"Appliance {self.appliance.nickname} not found in list of appliances")
+        return self.apply_record(record)

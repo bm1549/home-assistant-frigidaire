@@ -12,7 +12,7 @@ import frigidaire
 
 from .auth_store import load_auth, per_entry_auth_path, resolve_initial_auth_path, save_auth
 from .const import DOMAIN, PLATFORMS
-from .coordinator import FrigidaireApplianceCoordinator, _error_context
+from .coordinator import FrigidaireAccountCoordinator, FrigidaireApplianceCoordinator, _error_context
 
 # Guards writes to an entry's auth file: the client may re-authenticate from
 # multiple entity worker threads, so its persist callback can fire concurrently.
@@ -68,26 +68,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     client, appliances = await hass.async_add_executor_job(setup, entry.data["username"], entry.data["password"])
 
-    # One coordinator per appliance consolidates polling: every entity for a
-    # device reads from a single shared fetch instead of hitting the API on its
-    # own schedule. A first refresh here primes the data; individual failures are
-    # tolerated (the coordinator backs off and retries) so one flaky appliance
-    # doesn't block the whole entry from loading.
-    coordinators: dict[str, FrigidaireApplianceCoordinator] = {}
-    for appliance in appliances:
-        coordinator = FrigidaireApplianceCoordinator(
-            hass,
-            client,
-            appliance,
-            entry.options.get(appliance.appliance_id, {}),
+    # One request per poll cycle for the whole account: the account coordinator is the
+    # only thing that polls, and it pushes each appliance's record to that appliance's
+    # coordinator. Registering the listener is what schedules the polling; the first
+    # refresh primes every appliance coordinator before the platforms are set up.
+    account = FrigidaireAccountCoordinator(hass, client)
+    coordinators: dict[str, FrigidaireApplianceCoordinator] = {
+        appliance.appliance_id: FrigidaireApplianceCoordinator(
+            hass, client, appliance, account, entry.options.get(appliance.appliance_id, {})
         )
-        await coordinator.async_refresh()
-        coordinators[appliance.appliance_id] = coordinator
+        for appliance in appliances
+    }
+    entry.async_on_unload(account.async_add_listener(account.push_to_appliances))
+    await account.async_refresh()
 
     hass.data[DOMAIN][entry.entry_id] = {
         "client": client,
         "appliances": appliances,
         "coordinators": coordinators,
+        "account": account,
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
