@@ -4,10 +4,15 @@ import math
 
 import pytest
 from diagnostics import (
+    bucket_is_full,
     filter_needs_attention,
     filter_runtime_seconds,
+    humidity_percent,
+    link_quality,
+    network_rssi,
     normalize_alerts,
     normalize_filter_state,
+    particulate_matter,
 )
 
 
@@ -57,3 +62,92 @@ def test_normalize_alerts(alerts, expected):
 )
 def test_filter_runtime_seconds(seconds, expected):
     assert filter_runtime_seconds(seconds) == expected
+
+
+@pytest.mark.parametrize(
+    ("alerts", "water_bucket_level", "water_tank_full", "expected"),
+    [
+        (None, None, None, None),
+        ([], None, None, False),
+        (["BUCKET_FULL"], None, None, True),
+        (["FILTER"], 0, None, False),
+        (None, 1, None, True),
+        (None, 0, "NO", False),
+        (None, None, "yes", True),
+        (None, None, True, True),
+        (None, None, False, False),
+    ],
+)
+def test_bucket_is_full(alerts, water_bucket_level, water_tank_full, expected):
+    assert bucket_is_full(alerts, water_bucket_level, water_tank_full) is expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (86, 86),
+        ("48.5", 48.5),
+        (0, 0),
+        (100, 100),
+        (None, None),
+        ("invalid", None),
+        (-1, None),
+        (101, None),
+        (math.inf, None),
+        (math.nan, None),
+    ],
+)
+def test_humidity_percent(value, expected):
+    assert humidity_percent(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (4, 4),
+        ("12", 12),
+        (0, 0),
+        (None, None),
+        ("invalid", None),
+        (-1, None),
+        (math.inf, None),
+        (math.nan, None),
+    ],
+)
+def test_particulate_matter(value, expected):
+    assert particulate_matter(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ({"linkQualityIndicator": "EXCELLENT", "rssi": -41}, -41),
+        ({"rssi": "-67"}, -67),
+        # Positive dBm is not a real reading, so treat it as a placeholder.
+        ({"rssi": 41}, None),
+        ({"rssi": 0}, None),
+        ({"linkQualityIndicator": "EXCELLENT"}, None),
+        ({}, None),
+        (None, None),
+        # Appliances that report no Wi-Fi telemetry can send a scalar or a list here.
+        ("EXCELLENT", None),
+        ([], None),
+    ],
+)
+def test_network_rssi(value, expected):
+    assert network_rssi(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ({"linkQualityIndicator": "EXCELLENT", "rssi": -41}, "EXCELLENT"),
+        ({"linkQualityIndicator": "poor"}, "POOR"),
+        ({"rssi": -41}, None),
+        ({}, None),
+        (None, None),
+        ("EXCELLENT", None),
+    ],
+)
+def test_link_quality(value, expected):
+    assert link_quality(value) == expected

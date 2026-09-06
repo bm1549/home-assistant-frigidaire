@@ -11,6 +11,7 @@ SWITCH_OPTIONS: dict[str, str] = {
 }
 
 # Keys must match diagnostic entity keys.
+CONF_BUCKET_STATUS_SENSOR = "bucket_status"
 CONF_CHECK_FILTER_SENSOR = "check_filter"
 CONF_COMPRESSOR_ESTIMATE = "compressor"
 CONF_FILTER_RUNTIME_SENSOR = "filter_runtime"
@@ -22,6 +23,7 @@ CONF_COMPRESSOR_OFF_DELAY = "compressor_off_delay"
 
 BINARY_SENSOR_OPTIONS: dict[str, str] = {
     CONF_CHECK_FILTER_SENSOR: "Check Filter",
+    CONF_BUCKET_STATUS_SENSOR: "Bucket Status",
 }
 
 SENSOR_OPTIONS: dict[str, str] = {
