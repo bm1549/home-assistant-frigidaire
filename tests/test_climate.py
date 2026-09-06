@@ -23,7 +23,7 @@ async def set_hvac_mode(hass: HomeAssistant, entity_id: str, hvac_mode: str) -> 
     await hass.services.async_call(
         "climate", "set_hvac_mode", {"entity_id": entity_id, "hvac_mode": hvac_mode}, blocking=True
     )
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
 
 async def test_running_cool_unit_reports_cool_and_cooling(hass: HomeAssistant, setup_entry) -> None:
@@ -85,7 +85,7 @@ async def test_failed_poll_marks_climate_unavailable_and_logs(
     stub.details_error = frigidaire.FrigidaireException("Request failed", status_code=429, error_code="cas_3403")
 
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert hass.states.get(climate_id(hass)).state == "unavailable"
     assert "Error communicating with Frigidaire (status=429, error=cas_3403)" in caplog.text

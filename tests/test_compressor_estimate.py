@@ -38,7 +38,7 @@ async def test_room_below_target_estimates_idle_after_off_delay(hass: HomeAssist
     stub.records["AC-LEGACY-1"]["properties"]["reported"]["ambientTemperatureF"] = 70
 
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert hass.states.get(estimate_id(hass, "AC-LEGACY-1")).state == "off"
     assert climate_state(hass, "AC-LEGACY-1").attributes["hvac_action"] == "idle"
@@ -57,7 +57,7 @@ async def test_estimate_beats_dry(hass: HomeAssistant, setup_entry) -> None:
     await setup_entry([with_reported(LEGACY_AC, mode="DRY", ambientTemperatureF=70)], options=ESTIMATE_ON)
 
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done()
+    await hass.async_block_till_done(wait_background_tasks=True)
 
     assert hass.states.get(estimate_id(hass, "AC-LEGACY-1")).state == "off"
     assert climate_state(hass, "AC-LEGACY-1").attributes["hvac_action"] == "idle"
