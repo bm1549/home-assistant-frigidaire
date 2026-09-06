@@ -74,6 +74,7 @@ async def test_command_refresh_fetches_fresh_data(hass: HomeAssistant, setup_ent
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert stub.raw_fetch_count == 2
+    assert hass.states.get(climate_id(hass)).state == "fan_only"
 
 
 async def test_account_failure_marks_every_appliance_unavailable(
@@ -111,15 +112,22 @@ async def test_command_refresh_applies_the_commanded_record_exactly_once(hass: H
 
 
 async def test_one_malformed_record_does_not_affect_the_others(hass: HomeAssistant, setup_entry) -> None:
+    """The malformed record is the *first* one pushed, and the rest still get fresh values.
+
+    Malforming the last appliance would pass even if the push loop aborted on the error.
+    """
     _entry, stub = await setup_entry(THREE)
-    del stub.records["DH-1"]["properties"]
+    del stub.records["AC-LEGACY-1"]["properties"]
+    stub.records["AC-TELICA-1"]["properties"]["reported"]["mode"] = "cool"
+    stub.records["DH-1"]["properties"]["reported"]["targetHumidity"] = 42
 
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
     await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert state_of(hass, "humidifier", "DH-1") == "unavailable"
-    assert state_of(hass, "climate", "AC-LEGACY-1") == "cool"
-    assert state_of(hass, "climate", "AC-TELICA-1") == "fan_only"
+    assert state_of(hass, "climate", "AC-LEGACY-1") == "unavailable"
+    assert state_of(hass, "climate", "AC-TELICA-1") == "cool"
+    humidifier = hass.states.get(er.async_get(hass).async_get_entity_id("humidifier", DOMAIN, "DH-1"))
+    assert humidifier.attributes["humidity"] == 42
     assert stub.raw_fetch_count == 2
 
 
@@ -143,10 +151,37 @@ async def test_empty_reported_properties_fail_that_appliance_only(
 ) -> None:
     _entry, stub = await setup_entry(THREE)
     stub.records["AC-LEGACY-1"]["properties"]["reported"] = {}
+    # A fresh value on an appliance behind the failing one, so the assertion below proves
+    # the push kept going rather than just reading the state left over from setup.
+    stub.records["AC-TELICA-1"]["properties"]["reported"]["mode"] = "cool"
 
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert state_of(hass, "climate", "AC-LEGACY-1") == "unavailable"
-    assert state_of(hass, "climate", "AC-TELICA-1") == "fan_only"
+    assert state_of(hass, "climate", "AC-TELICA-1") == "cool"
     assert "no reported properties" in caplog.text
+
+
+async def test_record_without_an_appliance_id_is_skipped(
+    hass: HomeAssistant, setup_entry, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An unidentifiable record must not blow up the account fetch.
+
+    Indexing it with record["applianceId"] would raise KeyError past the except clause, so
+    the backoff would never run and the poll would fail with a traceback every cycle.
+    """
+    _entry, stub = await setup_entry(THREE)
+    stub.records["no-id"] = {"applianceData": {"modelName": "Mystery", "applianceName": "Mystery"}}
+    stub.records["AC-LEGACY-1"]["properties"]["reported"]["mode"] = "FANONLY"
+    stub.records["AC-TELICA-1"]["properties"]["reported"]["mode"] = "cool"
+    stub.records["DH-1"]["properties"]["reported"]["targetHumidity"] = 42
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert state_of(hass, "climate", "AC-LEGACY-1") == "fan_only"
+    assert state_of(hass, "climate", "AC-TELICA-1") == "cool"
+    humidifier = hass.states.get(er.async_get(hass).async_get_entity_id("humidifier", DOMAIN, "DH-1"))
+    assert humidifier.attributes["humidity"] == 42
+    assert "Unexpected error" not in caplog.text

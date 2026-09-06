@@ -104,7 +104,9 @@ class FrigidaireAccountCoordinator(DataUpdateCoordinator[dict[str, dict]]):
         if self._failure_count:
             self._failure_count = 0
             self.update_interval = BASE_INTERVAL
-        return {record["applianceId"]: record for record in records}
+        # Indexed with .get(): a record without an applianceId would otherwise raise
+        # KeyError out of the try above, skipping the backoff entirely.
+        return {appliance_id: record for record in records if (appliance_id := record.get("applianceId"))}
 
     @callback
     def push_to_appliances(self) -> None:
