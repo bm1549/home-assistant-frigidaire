@@ -34,6 +34,23 @@ def _normalize(value: Any) -> Any:
     return value
 
 
+def _error_context(err: Exception) -> str:
+    """Return " (status=…, error=…)" when the library attached structured error info.
+
+    The library redacts response bodies from exception messages, so without this the
+    log line for a 429 or a cas_3403 session cap is indistinguishable from any other
+    failure.
+    """
+    parts = []
+    status = getattr(err, "status_code", None)
+    if status is not None:
+        parts.append(f"status={status}")
+    code = getattr(err, "error_code", None)
+    if code:
+        parts.append(f"error={code}")
+    return f" ({', '.join(parts)})" if parts else ""
+
+
 class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
     """Polls a single Frigidaire appliance and shares its details with every entity."""
 
@@ -94,7 +111,7 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
             # 30s, 60s, 120s, 240s … capped at MAX_INTERVAL.
             backoff = BASE_INTERVAL * (2 ** (self._failure_count - 1))
             self.update_interval = min(backoff, MAX_INTERVAL)
-            raise UpdateFailed(f"Error communicating with Frigidaire: {err}") from err
+            raise UpdateFailed(f"Error communicating with Frigidaire{_error_context(err)}: {err}") from err
 
         # Recovered — resume the normal polling cadence.
         if self._failure_count:

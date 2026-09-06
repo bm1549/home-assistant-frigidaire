@@ -37,6 +37,30 @@ def filter_needs_attention(value: Any) -> bool | None:
     return None if state is None else state != GOOD_FILTER_STATE
 
 
+def bucket_is_full(
+    alerts: list[str] | None,
+    water_bucket_level: Any,
+    water_tank_full: Any,
+) -> bool | None:
+    """Return whether the water bucket is full, or None when unreported.
+
+    Different dehumidifier models report the bucket through different signals,
+    so all three are checked: a BUCKET_FULL alert code, waterBucketLevel == 1,
+    and waterTankFull. ``alerts`` must already be normalized (see
+    ``normalize_alerts``). Returns None when the appliance reports none of the
+    signals, letting callers distinguish "empty" from "not supported by this
+    model".
+    """
+    if alerts is None and water_bucket_level is None and water_tank_full is None:
+        return None
+    if alerts is not None and "BUCKET_FULL" in alerts:
+        return True
+    if water_bucket_level == 1:
+        return True
+    tank = water_tank_full.upper() if isinstance(water_tank_full, str) else water_tank_full
+    return tank in ("YES", True)
+
+
 def filter_runtime_seconds(value: Any) -> float | None:
     """Return valid cumulative filter-runtime seconds."""
     try:

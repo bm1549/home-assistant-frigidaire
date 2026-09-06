@@ -4,6 +4,14 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "tests/**"
+      - ".github/**"
+      - "docs/**"
+      - "README.md"
+      - "requirements_test.txt"
+      - "pyproject.toml"
+      - ".gitignore"
 
 permissions:
   contents: write

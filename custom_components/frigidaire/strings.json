@@ -15,10 +15,12 @@
           "display_light": "Display Light",
           "ui_lock": "Child Lock",
           "check_filter": "Check Filter",
+          "bucket_status": "Bucket Status",
           "filter_runtime": "Filter runtime"
         },
         "data_description": {
           "check_filter": "Problem sensor that turns on when the filter state is CLEAN, CHANGE, or BUY. Use it to trigger filter-maintenance notifications.",
+          "bucket_status": "Shows Full when the water bucket needs emptying and Empty otherwise. Dehumidifiers only — models that report no bucket signal show as unavailable.",
           "filter_runtime": "Cumulative air-filter runtime reported by the appliance in native seconds. Home Assistant converts it to the configured display unit."
         }
       }
@@ -43,11 +45,23 @@
           "display_light": "Display Light",
           "ui_lock": "Child Lock",
           "check_filter": "Check Filter",
+          "bucket_status": "Bucket Status",
           "filter_runtime": "Filter runtime"
         },
         "data_description": {
           "check_filter": "Problem sensor that turns on when the filter state is CLEAN, CHANGE, or BUY. Use it to trigger filter-maintenance notifications.",
+          "bucket_status": "Shows Full when the water bucket needs emptying and Empty otherwise. Dehumidifiers only — models that report no bucket signal show as unavailable.",
           "filter_runtime": "Cumulative air-filter runtime reported by the appliance in native seconds. Home Assistant converts it to the configured display unit."
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "bucket_status": {
+        "state": {
+          "off": "Empty",
+          "on": "Full"
         }
       }
     }

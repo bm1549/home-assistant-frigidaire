@@ -62,6 +62,7 @@ During setup — or at any time via **Configure** — you can enable additional 
 | Display Light | Switch | Toggles the unit's display panel light |
 | Child Lock | Switch | Locks the physical controls on the unit |
 | Check Filter | Problem binary sensor | On for `CLEAN`, `CHANGE`, or `BUY`; exposes `filter_state` for notification automations |
+| Bucket Status | Binary sensor | Full/Empty for the water bucket; dehumidifiers only, unavailable on models that report no bucket signal |
 | Filter Runtime | Duration sensor | Cumulative filter runtime reported by the appliance in native seconds; Home Assistant handles display-unit conversion |
 
 Each device is configured independently, so a home with both an AC and a dehumidifier can have different entities enabled for each.

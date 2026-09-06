@@ -12,7 +12,7 @@ import frigidaire
 
 from .auth_store import load_auth, per_entry_auth_path, resolve_initial_auth_path, save_auth
 from .const import DOMAIN, PLATFORMS
-from .coordinator import FrigidaireApplianceCoordinator
+from .coordinator import FrigidaireApplianceCoordinator, _error_context
 
 # Guards writes to an entry's auth file: the client may re-authenticate from
 # multiple entity worker threads, so its persist callback can fire concurrently.
@@ -60,10 +60,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         except frigidaire.FrigidaireException as err:
             # Handle frigidaire's active-session cap (cas_3403) gracefully. Raise
             # ConfigEntryNotReady so HA retries setup automatically rather than
-            # aborting — AbortFlow is only valid inside a config flow, not here.
-            if "cas_3403" in str(err):
+            # aborting. The library redacts response bodies from the message, so the
+            # platform error code is only available structurally on the exception.
+            if getattr(err, "error_code", None) == "cas_3403":
                 raise ConfigEntryNotReady("Rate limited by Frigidaire. Will retry automatically.") from err
-            raise ConfigEntryNotReady(f"Frigidaire error during setup: {err}") from err
+            raise ConfigEntryNotReady(f"Frigidaire error during setup{_error_context(err)}: {err}") from err
 
     client, appliances = await hass.async_add_executor_job(setup, entry.data["username"], entry.data["password"])
 
