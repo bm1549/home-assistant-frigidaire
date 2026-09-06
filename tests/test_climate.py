@@ -7,7 +7,7 @@ import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from payloads import LEGACY_AC, with_reported
+from payloads import LEGACY_AC, TELICA_AC, with_reported
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 OFF_AC = with_reported(LEGACY_AC, applianceState="OFF", mode="OFF")
@@ -89,3 +89,40 @@ async def test_failed_poll_marks_climate_unavailable_and_logs(
 
     assert hass.states.get(climate_id(hass)).state == "unavailable"
     assert "Error communicating with Frigidaire (status=429, error=cas_3403)" in caplog.text
+
+
+async def test_hvac_action_prefers_reported_mode_state(hass: HomeAssistant, setup_entry) -> None:
+    """In eco the requested mode says nothing about what the unit is doing; modeState does."""
+    await setup_entry([with_reported(TELICA_AC, mode="eco", modeState="cool")])
+
+    entity_id = er.async_get(hass).async_get_entity_id("climate", "frigidaire", "AC-TELICA-1")
+    state = hass.states.get(entity_id)
+    assert state.state == "auto"
+    assert state.attributes["hvac_action"] == "cooling"
+
+
+async def test_hvac_action_fan_from_mode_state(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(TELICA_AC, mode="eco", modeState="fanOnly")])
+
+    entity_id = er.async_get(hass).async_get_entity_id("climate", "frigidaire", "AC-TELICA-1")
+    assert hass.states.get(entity_id).attributes["hvac_action"] == "fan"
+
+
+async def test_hvac_action_falls_back_to_mode_when_mode_state_absent(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(LEGACY_AC, mode="FANONLY")])
+
+    assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "fan"
+
+
+async def test_mode_state_overrides_a_concrete_requested_mode(hass: HomeAssistant, setup_entry) -> None:
+    """modeState wins even when the requested mode is itself an activity, not just in eco."""
+    await setup_entry([with_reported(TELICA_AC, mode="cool", modeState="fanOnly")])
+
+    entity_id = er.async_get(hass).async_get_entity_id("climate", "frigidaire", "AC-TELICA-1")
+    assert hass.states.get(entity_id).attributes["hvac_action"] == "fan"
+
+
+async def test_hvac_action_falls_back_to_drying_for_dry_mode(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(LEGACY_AC, mode="DRY")])
+
+    assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "drying"

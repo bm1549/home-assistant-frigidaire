@@ -54,6 +54,11 @@ class StubFrigidaire:
             raise self.details_error
         return self.records[appliance.appliance_id]["properties"]["reported"]
 
+    def get_appliance_raw(self, appliance: frigidaire.Appliance) -> dict:
+        if self.details_error is not None:
+            raise self.details_error
+        return self.records[appliance.appliance_id]
+
     def execute_action(self, appliance: frigidaire.Appliance, action: list[frigidaire.Component]) -> None:
         self.commands.extend((component.name, component.value) for component in action)
 
