@@ -65,7 +65,7 @@ async def test_every_appliance_sees_its_own_record(hass: HomeAssistant, setup_en
 
 
 async def test_command_refresh_fetches_fresh_data(hass: HomeAssistant, setup_entry) -> None:
-    _entry, stub = await setup_entry(THREE)
+    entry, stub = await setup_entry(THREE)
     stub.records["AC-LEGACY-1"]["properties"]["reported"]["mode"] = "FANONLY"
 
     await hass.services.async_call(
@@ -74,7 +74,11 @@ async def test_command_refresh_fetches_fresh_data(hass: HomeAssistant, setup_ent
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert stub.raw_fetch_count == 2
-    assert hass.states.get(climate_id(hass)).state == "fan_only"
+    # Asserted on coordinator.data, not the entity state: for OPTIMISTIC_WINDOW seconds
+    # after a command the climate entity reports _optimistic_hvac_mode, so an entity-state
+    # assertion would pass even if the refreshed record never reached the coordinator.
+    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinators"]["AC-LEGACY-1"]
+    assert coordinator.data[frigidaire.Detail.MODE] == "FANONLY"
 
 
 async def test_account_failure_marks_every_appliance_unavailable(
