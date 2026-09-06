@@ -81,10 +81,9 @@ class FrigidaireConnectivitySensor(CoordinatorEntity[FrigidaireApplianceCoordina
 
     @property
     def available(self) -> bool:
-        # Deliberately not gated on super().available: when a poll fails, whether the
-        # appliance is reachable is exactly what the user wants to see, so report the last
-        # known connection state rather than going unavailable alongside everything else.
-        return self.coordinator.is_connected is not None
+        # Like every other entity, go unavailable when the poll itself fails: a cached
+        # "connected" during an API outage would be misleading.
+        return super().available and self.coordinator.is_connected is not None
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:

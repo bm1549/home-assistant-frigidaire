@@ -22,9 +22,14 @@ async def test_setup_creates_expected_entities_for_each_appliance(hass: HomeAssi
     assert entity_id_for(hass, "number", "AC-LEGACY-1_timer_on") is not None
     assert entity_id_for(hass, "number", "AC-LEGACY-1_timer_off") is not None
     assert entity_id_for(hass, "humidifier", "DH-1") is not None
-    # No options enabled and the dehumidifier reports no temperature: nothing else appears.
+    # Connectivity is created for every appliance that reports connectionState, and the
+    # dehumidifier's reported sensorHumidity gets a humidity sensor; with no options enabled
+    # and no temperature on the dehumidifier, nothing else appears.
+    assert entity_id_for(hass, "binary_sensor", "AC-LEGACY-1_connectivity") is not None
+    assert entity_id_for(hass, "binary_sensor", "DH-1_connectivity") is not None
+    assert entity_id_for(hass, "sensor", "DH-1_humidity") is not None
     registry = er.async_get(hass)
-    assert len(er.async_entries_for_config_entry(registry, entry.entry_id)) == 4
+    assert len(er.async_entries_for_config_entry(registry, entry.entry_id)) == 7
 
 
 async def test_dehumidifier_reporting_temperature_gets_temperature_sensor(hass: HomeAssistant, setup_entry) -> None:
