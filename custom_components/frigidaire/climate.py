@@ -305,6 +305,10 @@ class FrigidaireClimate(CoordinatorEntity[FrigidaireApplianceCoordinator], Clima
         # than collapsing everything to COOLING.
         if mode == HVACMode.FAN_ONLY:
             return HVACAction.FAN
+        # The opt-in temperature-based estimate only refines hvac_action on appliances
+        # that do not report modeState; real telemetry above always wins.
+        if self.coordinator.compressor_estimation_enabled and self.coordinator.compressor_running is False:
+            return HVACAction.IDLE
         if mode == HVACMode.DRY:
             return HVACAction.DRYING
         return HVACAction.COOLING

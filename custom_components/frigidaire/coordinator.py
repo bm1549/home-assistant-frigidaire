@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Mapping
 from datetime import timedelta
 from typing import Any
 
@@ -10,6 +12,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 import frigidaire
+
+from .compressor import CompressorEstimator
+from .const import (
+    CONF_COMPRESSOR_ESTIMATE,
+    CONF_COMPRESSOR_OFF_DELAY,
+    CONF_COOL_HYSTERESIS,
+    DEFAULT_COMPRESSOR_OFF_DELAY,
+    DEFAULT_COOL_HYSTERESIS,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +43,13 @@ def _normalize(value: Any) -> Any:
     if isinstance(value, str):
         return value.upper()
     return value
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def _error_context(err: Exception) -> str:
@@ -59,6 +77,7 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
         hass: HomeAssistant,
         client: frigidaire.Frigidaire,
         appliance: frigidaire.Appliance,
+        options: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(
             hass,
@@ -69,7 +88,28 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
         self.client = client
         self.appliance = appliance
         self._failure_count = 0
+        options = options or {}
+        self._compressor_estimator = (
+            CompressorEstimator(
+                hysteresis=_coerce_float(options.get(CONF_COOL_HYSTERESIS), DEFAULT_COOL_HYSTERESIS),
+                off_delay=_coerce_float(options.get(CONF_COMPRESSOR_OFF_DELAY), DEFAULT_COMPRESSOR_OFF_DELAY),
+            )
+            if appliance.destination == frigidaire.Destination.AIR_CONDITIONER
+            and options.get(CONF_COMPRESSOR_ESTIMATE, False)
+            else None
+        )
+        self._compressor_running: bool | None = None
         self._connection_state: str | None = None
+
+    @property
+    def compressor_estimation_enabled(self) -> bool:
+        """Return whether temperature-based compressor estimation is enabled."""
+        return self._compressor_estimator is not None
+
+    @property
+    def compressor_running(self) -> bool | None:
+        """Return the shared temperature-based compressor estimate."""
+        return self._compressor_running
 
     @property
     def connection_state(self) -> str | None:
@@ -100,6 +140,38 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
             frigidaire.FanSpeed.HIGH: "high",
         }.get(_normalize(raw), str(raw).lower())
 
+    def _update_compressor_estimate(self, details: dict) -> None:
+        """Update the opt-in estimate from one coordinator response."""
+        if self._compressor_estimator is None:
+            return
+
+        mode = _normalize(details.get(frigidaire.Detail.MODE))
+        appliance_state = _normalize(details.get(frigidaire.Detail.APPLIANCE_STATE))
+        if mode == frigidaire.Mode.OFF or (
+            appliance_state is not None and appliance_state != frigidaire.ApplianceState.RUNNING
+        ):
+            self._compressor_running = self._compressor_estimator.force_off()
+            return
+        if mode == frigidaire.Mode.FAN:
+            self._compressor_running = self._compressor_estimator.force_off()
+            return
+        if mode not in (frigidaire.Mode.COOL, frigidaire.Mode.ECO, frigidaire.Mode.AUTO, frigidaire.Mode.DRY):
+            self._compressor_running = None
+            return
+
+        unit = _normalize(details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION))
+        if unit == frigidaire.Unit.FAHRENHEIT:
+            current = details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_F)
+            target = details.get(frigidaire.Detail.TARGET_TEMPERATURE_F)
+        elif unit == frigidaire.Unit.CELSIUS:
+            current = details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_C)
+            target = details.get(frigidaire.Detail.TARGET_TEMPERATURE_C)
+        else:
+            self._compressor_running = None
+            return
+
+        self._compressor_running = self._compressor_estimator.update(current, target, now=time.monotonic())
+
     async def _async_update_data(self) -> dict:
         """Fetch the latest appliance details, backing off on repeated failures."""
         try:
@@ -124,4 +196,5 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
         reported = (raw.get("properties") or {}).get("reported")
         if not isinstance(reported, dict):
             raise UpdateFailed(f"Frigidaire returned no reported properties for {self.appliance.nickname}")
+        self._update_compressor_estimate(reported)
         return reported

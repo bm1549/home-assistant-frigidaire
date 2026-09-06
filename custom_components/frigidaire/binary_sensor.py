@@ -18,6 +18,7 @@ import frigidaire
 from .const import (
     CONF_BUCKET_STATUS_SENSOR,
     CONF_CHECK_FILTER_SENSOR,
+    CONF_COMPRESSOR_ESTIMATE,
     DOMAIN,
 )
 from .coordinator import FrigidaireApplianceCoordinator
@@ -51,6 +52,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         # Only dehumidifiers have a water bucket.
         if appliance.destination == frigidaire.Destination.DEHUMIDIFIER
         and options.get(appliance.appliance_id, {}).get(CONF_BUCKET_STATUS_SENSOR, False)
+    ]
+    entities += [
+        FrigidaireCompressorEstimateSensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
+        for appliance in appliances
+        if appliance.destination == frigidaire.Destination.AIR_CONDITIONER
+        and options.get(appliance.appliance_id, {}).get(CONF_COMPRESSOR_ESTIMATE, False)
     ]
 
     async_add_entities(entities)
@@ -184,3 +191,30 @@ class FrigidaireBucketStatusSensor(CoordinatorEntity[FrigidaireApplianceCoordina
     @property
     def icon(self) -> str:
         return "mdi:water-alert" if self.is_on else "mdi:cup-water"
+
+
+class FrigidaireCompressorEstimateSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
+    """Expose the coordinator's opt-in compressor estimate."""
+
+    _attr_device_class = BinarySensorDeviceClass.RUNNING
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None) -> None:
+        super().__init__(coordinator)
+        self._appliance = coordinator.appliance
+        self._attr_unique_id = f"{self._appliance.appliance_id}_compressor"
+        self._attr_name = "Compressor Estimate"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._appliance.appliance_id)},
+            name=self._appliance.nickname,
+            manufacturer="Frigidaire",
+            suggested_area=suggested_area,
+        )
+
+    @property
+    def available(self) -> bool:
+        return super().available and self.coordinator.compressor_running is not None
+
+    @property
+    def is_on(self) -> bool | None:
+        return self.coordinator.compressor_running
