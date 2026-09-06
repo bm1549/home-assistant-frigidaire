@@ -121,4 +121,7 @@ class FrigidaireApplianceCoordinator(DataUpdateCoordinator[dict]):
         self._connection_state = _normalize(raw.get(CONNECTION_STATE_KEY))
         # coordinator.data stays exactly the properties.reported dict that every platform
         # already indexes with frigidaire.Detail keys.
-        return raw.get("properties", {}).get("reported", {})
+        reported = (raw.get("properties") or {}).get("reported")
+        if not isinstance(reported, dict):
+            raise UpdateFailed(f"Frigidaire returned no reported properties for {self.appliance.nickname}")
+        return reported

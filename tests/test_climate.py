@@ -112,3 +112,17 @@ async def test_hvac_action_falls_back_to_mode_when_mode_state_absent(hass: HomeA
     await setup_entry([with_reported(LEGACY_AC, mode="FANONLY")])
 
     assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "fan"
+
+
+async def test_mode_state_overrides_a_concrete_requested_mode(hass: HomeAssistant, setup_entry) -> None:
+    """modeState wins even when the requested mode is itself an activity, not just in eco."""
+    await setup_entry([with_reported(TELICA_AC, mode="cool", modeState="fanOnly")])
+
+    entity_id = er.async_get(hass).async_get_entity_id("climate", "frigidaire", "AC-TELICA-1")
+    assert hass.states.get(entity_id).attributes["hvac_action"] == "fan"
+
+
+async def test_hvac_action_falls_back_to_drying_for_dry_mode(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(LEGACY_AC, mode="DRY")])
+
+    assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "drying"
