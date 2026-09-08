@@ -1,0 +1,146 @@
+name: Home Assistant deprecations
+
+# The regular test workflow runs against the Home Assistant version pinned in
+# requirements_test.txt, so it only ever sees deprecations we already know about. This one runs
+# daily against the *latest* Home Assistant instead and files what it finds as an issue -- the point
+# is to hear about a removal from CI a year ahead of time, rather than from a user's log afterwards.
+
+on:
+  schedule:
+    # 07:20 UTC daily. Off the hour, because scheduled runs queue behind everyone else's :00 jobs.
+    - cron: "20 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: deprecations
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+
+      - name: Install against the latest Home Assistant
+        run: |
+          pip install -r requirements_test.txt
+          # Deliberately unpinned: this is the whole point of the workflow. The frigidaire client
+          # stays at its pinned version so a change there cannot be mistaken for a core deprecation.
+          pip install -U pytest-homeassistant-custom-component
+
+      - name: Record which Home Assistant we got
+        id: ha
+        run: |
+          version=$(python -c 'from homeassistant.const import __version__; print(__version__)')
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Scanning against Home Assistant $version" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Scan for deprecations
+        id: scan
+        run: |
+          # The script exits 1 when it finds something, which is not a failure of this workflow, so
+          # read the verdict out of the report instead -- a missing report means the scan itself
+          # broke, and that should fail loudly.
+          set +e
+          python scripts/check_deprecations.py --json deprecations.json --markdown deprecations.md
+          status=$?
+          set -e
+          if [ ! -f deprecations.json ]; then
+            echo "::error::The deprecation scan did not produce a report (exit $status)"
+            exit 1
+          fi
+          found=$(python -c "import json; print(str(json.load(open('deprecations.json'))['has_findings']).lower())")
+          echo "found=$found" >> "$GITHUB_OUTPUT"
+          cat deprecations.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: deprecation-report
+          path: |
+            deprecations.json
+            deprecations.md
+          if-no-files-found: ignore
+
+      - name: Open, update or close the tracking issue
+        uses: actions/github-script@v9
+        env:
+          FOUND: ${{ steps.scan.outputs.found }}
+          HA_VERSION: ${{ steps.ha.outputs.version }}
+        with:
+          script: |
+            const fs = require('fs');
+            // Findings change as core announces things and we fix them, so the workflow keeps one
+            // living issue rather than filing a new one every morning. The marker is how it finds
+            // that issue again; a label would work too, but this survives someone relabelling.
+            const MARKER = '<!-- ha-deprecation-scan -->';
+            const TITLE = 'Home Assistant deprecations affecting this integration';
+            const { owner, repo } = context.repo;
+            const found = process.env.FOUND === 'true';
+            const report = fs.readFileSync('deprecations.md', 'utf8');
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const body = [
+              MARKER,
+              report,
+              '',
+              `Found by [the daily deprecation scan](${runUrl}) against Home Assistant ${process.env.HA_VERSION}.`,
+              'Each run rewrites this body, so edits to it will be overwritten.',
+            ].join('\n');
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = issues.find(
+              (issue) => !issue.pull_request && (issue.body ?? '').includes(MARKER)
+            );
+
+            if (found && !existing) {
+              const created = await github.rest.issues.create({ owner, repo, title: TITLE, body });
+              core.notice(`Opened #${created.data.number}`);
+              return;
+            }
+
+            if (found) {
+              // The run link and version change every day; compare only the findings above them, so
+              // the issue does not collect an identical comment every morning.
+              const findings = (text) => text.split(MARKER).pop().split('Found by [')[0];
+              const changed = findings(existing.body ?? '') !== findings(body);
+              await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+              if (changed) {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: existing.number,
+                  body: `The deprecation scan found something new against Home Assistant ${process.env.HA_VERSION}:\n\n${report}`,
+                });
+              }
+              core.notice(`Updated #${existing.number}${changed ? ' (findings changed)' : ''}`);
+              return;
+            }
+
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body: `No deprecated Home Assistant APIs are in use as of ${process.env.HA_VERSION}. Closing.`,
+              });
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: existing.number,
+                state: 'closed',
+                state_reason: 'completed',
+              });
+              core.notice(`Closed #${existing.number}`);
+            }
