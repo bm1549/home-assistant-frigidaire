@@ -1,8 +1,8 @@
 """Switch entity behaviour for opt-in dehumidifier/AC switches."""
 
+from frigidaire.testing import DEHUMIDIFIER, with_reported
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from payloads import DEHUMIDIFIER, with_reported
 
 ALL_SWITCHES_ENABLED = {"DH-1": {"display_light": True, "clean_air_mode": True, "ui_lock": True}}
 

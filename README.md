@@ -119,6 +119,7 @@ The 0.1.27 release introduces device grouping, per-device switch configuration, 
 
 - **Integration doesn't show up in the list?** Restart HA one more time. Also double-check the folder path — it should be `/config/custom_components/frigidaire/`, not nested deeper.
 - **Login keeps failing?** Make sure you're using the same email and password as the Frigidaire mobile app. No extra spaces.
+- **Changed your Frigidaire password?** Home Assistant shows a **Re-authenticate** prompt on the integration; enter the new password there and the entry reloads. No need to remove and re-add it.
 - **No devices after a successful login?** Open the Frigidaire app and confirm your appliances are online there. If the app can't see them, HA won't either.
 
 Found a bug or have an idea? Open an [issue](https://github.com/bm1549/home-assistant-frigidaire/issues). PRs are welcome too.

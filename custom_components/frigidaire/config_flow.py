@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
 import frigidaire
 
-from .auth_store import AUTH_FILE, load_auth, save_auth
 from .const import (
     BINARY_SENSOR_OPTIONS,
     CONF_COMPRESSOR_ESTIMATE,
@@ -26,18 +24,21 @@ from .const import (
     SENSOR_OPTIONS,
     SWITCH_OPTIONS,
 )
+from .coordinator import FrigidaireConfigEntry
+from .session import session_store
 
 _LOGGER = logging.getLogger(__name__)
 
 STEP_USER_DATA_SCHEMA = vol.Schema({"username": str, "password": str})
+STEP_REAUTH_DATA_SCHEMA = vol.Schema({vol.Required("password"): str})
 
 ALL_OPTIONS = {**SWITCH_OPTIONS, **BINARY_SENSOR_OPTIONS, **SENSOR_OPTIONS}
 
 
-def _device_schema(current: dict, appliance: frigidaire.Appliance | None = None) -> vol.Schema:
+def _device_schema(current: dict, appliance: frigidaire.Appliance) -> vol.Schema:
     fields: dict = {vol.Optional(key, default=current.get(key, False)): bool for key in ALL_OPTIONS}
 
-    if appliance is not None and appliance.destination == frigidaire.Destination.AIR_CONDITIONER:
+    if appliance.destination is frigidaire.Destination.AIR_CONDITIONER:
         fields[vol.Optional(CONF_COMPRESSOR_ESTIMATE, default=current.get(CONF_COMPRESSOR_ESTIMATE, False))] = bool
         fields[
             vol.Optional(
@@ -55,36 +56,22 @@ def _device_schema(current: dict, appliance: frigidaire.Appliance | None = None)
     return vol.Schema(fields)
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> list[frigidaire.Appliance]:
-    """Validate credentials and return list of appliances."""
+async def _login(hass: HomeAssistant, username: str, password: str, entry_id: str | None) -> list[frigidaire.Appliance]:
+    """Verify the credentials with a full login and return the account's appliances."""
 
-    def setup(username: str, password: str) -> list[frigidaire.Appliance]:
-        auth_path = os.path.join(hass.config.path(), AUTH_FILE)
+    def connect() -> list[frigidaire.Appliance]:
+        client = frigidaire.Frigidaire(username, password, timeout=60)
+        # Save the session so setup reuses it instead of minting a second one: Frigidaire
+        # caps active sessions per account.
+        session_store(hass.config.path(), entry_id).save(client.session_key, client.regional_base_url)
+        return client.get_appliances()
 
-        try:
-            session_key, regional_base_url = load_auth(auth_path)
-            client = frigidaire.Frigidaire(
-                username=username,
-                password=password,
-                timeout=60,
-                session_key=session_key,
-                regional_base_url=regional_base_url,
-            )
-            save_auth(auth_path, client.session_key, client.regional_base_url)
-
-            return client.get_appliances()
-        except frigidaire.FrigidaireException as err:
-            if "Failed to authenticate" in str(err):
-                raise InvalidAuth from err
-
-            raise CannotConnect from err
-
-    appliances = await hass.async_add_executor_job(setup, data["username"], data["password"])
-
-    if len(appliances) == 0:
-        raise NoAppliances
-
-    return appliances
+    try:
+        return await hass.async_add_executor_job(connect)
+    except frigidaire.AuthenticationError as err:
+        raise InvalidAuth from err
+    except frigidaire.FrigidaireException as err:
+        raise CannotConnect from err
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -94,15 +81,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._user_input: dict[str, Any] = {}
-        self._appliances: list[frigidaire.Appliance] = []
         self._pending_appliances: list[frigidaire.Appliance] = []
         self._options: dict[str, dict[str, Any]] = {}
 
     @staticmethod
-    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> config_entries.OptionsFlow:
-        return OptionsFlowHandler(config_entry)
+    def async_get_options_flow(config_entry: FrigidaireConfigEntry) -> config_entries.OptionsFlow:
+        return OptionsFlowHandler()
 
-    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step."""
         if user_input is None:
             return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA)
@@ -110,33 +96,33 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
 
         try:
-            appliances = await validate_input(self.hass, user_input)
+            appliances = await _login(self.hass, user_input["username"], user_input["password"], entry_id=None)
         except CannotConnect:
             errors["base"] = "cannot_connect"
         except InvalidAuth:
             errors["base"] = "invalid_auth"
-        except NoAppliances:
-            errors["base"] = "no_appliances"
         except Exception:  # pylint: disable=broad-except
             _LOGGER.exception("Unexpected exception")
             errors["base"] = "unknown"
         else:
-            await self.async_set_unique_id(user_input["username"].lower())
-            self._abort_if_unique_id_configured()
-            self._user_input = user_input
-            self._appliances = appliances
-            self._pending_appliances = list(appliances)
-            return await self._async_next_device_step()
+            if not appliances:
+                errors["base"] = "no_appliances"
+            else:
+                await self.async_set_unique_id(user_input["username"].lower())
+                self._abort_if_unique_id_configured()
+                self._user_input = user_input
+                self._pending_appliances = list(appliances)
+                return await self._async_next_device_step()
 
         return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
 
-    async def _async_next_device_step(self) -> FlowResult:
+    async def _async_next_device_step(self) -> ConfigFlowResult:
         if not self._pending_appliances:
             return self.async_create_entry(title="Frigidaire", data=self._user_input, options=self._options)
         return await self.async_step_device()
 
-    async def async_step_device(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Show switch checkboxes for the current appliance in the queue."""
+    async def async_step_device(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Show the optional-entity checkboxes for the next appliance in the queue."""
         appliance = self._pending_appliances[0]
 
         if user_input is not None:
@@ -144,38 +130,60 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._pending_appliances.pop(0)
             return await self._async_next_device_step()
 
-        schema = _device_schema({}, appliance)
         return self.async_show_form(
             step_id="device",
-            data_schema=schema,
+            data_schema=_device_schema({}, appliance),
             description_placeholders={"device_name": appliance.nickname},
+        )
+
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+        """The stored password stopped working."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Ask for a new password and reload the entry with it."""
+        entry = self._get_reauth_entry()
+        errors = {}
+
+        if user_input is not None:
+            try:
+                await _login(self.hass, entry.data["username"], user_input["password"], entry.entry_id)
+            except InvalidAuth:
+                errors["base"] = "invalid_auth"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            else:
+                return self.async_update_reload_and_abort(entry, data_updates={"password": user_input["password"]})
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=STEP_REAUTH_DATA_SCHEMA,
+            description_placeholders={"username": entry.data["username"]},
+            errors=errors,
         )
 
 
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for the frigidaire integration."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self._entry_id = config_entry.entry_id
-        self._appliances: list[frigidaire.Appliance] = []
+    def __init__(self) -> None:
         self._pending_appliances: list[frigidaire.Appliance] = []
         self._options: dict[str, dict[str, Any]] = {}
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Load appliances then start per-device steps."""
-        entry = self.hass.config_entries.async_get_entry(self._entry_id)
-        self._appliances = self.hass.data[DOMAIN][self._entry_id]["appliances"]
-        self._pending_appliances = list(self._appliances)
-        self._options = dict(entry.options)
+        coordinator = self.config_entry.runtime_data
+        self._pending_appliances = list(coordinator.data.values())
+        self._options = dict(self.config_entry.options)
         return await self._async_next_device_step()
 
-    async def _async_next_device_step(self) -> FlowResult:
+    async def _async_next_device_step(self) -> ConfigFlowResult:
         if not self._pending_appliances:
             return self.async_create_entry(title="", data=self._options)
         return await self.async_step_device()
 
-    async def async_step_device(self, user_input: dict[str, Any] | None = None) -> FlowResult:
-        """Show switch checkboxes for the current appliance in the queue."""
+    async def async_step_device(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Show the optional-entity checkboxes for the next appliance in the queue."""
         appliance = self._pending_appliances[0]
         current = self._options.get(appliance.appliance_id, {})
 
@@ -184,16 +192,11 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             self._pending_appliances.pop(0)
             return await self._async_next_device_step()
 
-        schema = _device_schema(current, appliance)
         return self.async_show_form(
             step_id="device",
-            data_schema=schema,
+            data_schema=_device_schema(current, appliance),
             description_placeholders={"device_name": appliance.nickname},
         )
-
-
-class NoAppliances(HomeAssistantError):
-    """Error to indicate there are no appliances."""
 
 
 class CannotConnect(HomeAssistantError):

@@ -1,4 +1,4 @@
-"""Sensor entities for the frigidaire integration."""
+"""Sensor entities for values the appliances report."""
 
 from __future__ import annotations
 
@@ -6,12 +6,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-    SensorStateClass,
-)
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import (
     CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
     PERCENTAGE,
@@ -20,275 +15,152 @@ from homeassistant.const import (
     UnitOfTime,
 )
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-import frigidaire
+from frigidaire import Appliance, Destination, Unit
 
-from .const import CONF_FILTER_RUNTIME_SENSOR, DOMAIN
-from .coordinator import FrigidaireApplianceCoordinator
-from .diagnostics import (
-    AIR_FILTER_LIFETIME_KEY,
-    filter_runtime_seconds,
-    humidity_percent,
-    link_quality,
-    network_rssi,
-    particulate_matter,
-)
-from .helpers import suggest_area
-
-
-def _normalize(value):
-    if isinstance(value, str):
-        return value.upper()
-    return value
-
+from .const import CONF_FILTER_RUNTIME_SENSOR
+from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
+from .entity import FrigidaireEntity
 
 FRIGIDAIRE_TO_HA_UNIT = {
-    frigidaire.Unit.FAHRENHEIT: UnitOfTemperature.FAHRENHEIT,
-    frigidaire.Unit.CELSIUS: UnitOfTemperature.CELSIUS,
+    Unit.FAHRENHEIT: UnitOfTemperature.FAHRENHEIT,
+    Unit.CELSIUS: UnitOfTemperature.CELSIUS,
 }
 
 
-def _reports_temperature(details: dict) -> bool:
-    """Return True if the appliance is reporting an ambient temperature.
-
-    Only some dehumidifiers have a temperature sensor, so we key entity
-    creation off whether the device actually reports one. Devices without it
-    never get a temperature entity.
-    """
-    return (
-        details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_F) is not None
-        or details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_C) is not None
-    )
-
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class SensorDescription:
-    """A sensor derived from a single reported detail.
+    """A sensor derived from one reported value.
 
-    value_fn does the parsing and validation, so a detail the appliance reports as a
-    placeholder or in an impossible range yields None and the sensor is never created.
+    Sensors without an ``option`` are created only when the appliance reports a usable value,
+    so appliances without the hardware stay clean. Opt-in sensors are created when their
+    option is on and go unavailable while the value is missing.
     """
 
     key: str
     name: str
-    detail: frigidaire.Detail
-    value_fn: Callable[[Any], float | None]
+    value_fn: Callable[[Appliance], float | None]
     device_class: SensorDeviceClass
-    native_unit: str
+    native_unit: str | None = None
+    native_unit_fn: Callable[[Appliance], str | None] | None = None
     state_class: SensorStateClass = SensorStateClass.MEASUREMENT
     entity_category: EntityCategory | None = None
     enabled_default: bool = True
-    attributes_fn: Callable[[Any], Mapping[str, Any] | None] | None = None
-    suggested_display_precision: int | None = None
+    icon: str | None = None
+    attributes_fn: Callable[[Appliance], Mapping[str, Any] | None] | None = None
+    destination: Destination | None = None  # only this appliance type
+    option: str | None = None  # a per-device option key in const.py
 
 
-def _link_quality_attributes(raw: Any) -> Mapping[str, Any] | None:
-    indicator = link_quality(raw)
-    return None if indicator is None else {"link_quality": indicator}
-
-
-# Details the appliance already sends on every poll. Each entity is created only when its
-# value_fn returns a value, so appliances without the hardware stay clean.
-#
-# Deliberately absent: Detail.PM10. On a Telica portable AC it alternates between a fixed
-# placeholder (199) and a value identical to pm25, so it carries no information that pm25
-# does not already provide and would publish a bogus reading half the time.
-SENSOR_DESCRIPTIONS: tuple[SensorDescription, ...] = (
+# Deliberately absent: pm10. On a Telica portable AC it alternates between a fixed
+# placeholder (199) and a value identical to pm25, so it would publish a bogus reading
+# half the time.
+SENSOR_DESCRIPTIONS = (
+    SensorDescription(
+        key="temperature",
+        name="Temperature",
+        value_fn=lambda appliance: appliance.ambient_temperature,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_fn=lambda appliance: FRIGIDAIRE_TO_HA_UNIT.get(appliance.temperature_unit),
+        # The climate entity already carries an air conditioner's room temperature.
+        destination=Destination.DEHUMIDIFIER,
+    ),
     SensorDescription(
         key="humidity",
         name="Humidity",
-        detail=frigidaire.Detail.SENSOR_HUMIDITY,
-        value_fn=humidity_percent,
+        value_fn=lambda appliance: appliance.humidity,
         device_class=SensorDeviceClass.HUMIDITY,
         native_unit=PERCENTAGE,
     ),
     SensorDescription(
         key="pm25",
         name="PM2.5",
-        detail=frigidaire.Detail.PM25,
-        value_fn=particulate_matter,
+        value_fn=lambda appliance: appliance.pm25,
         device_class=SensorDeviceClass.PM25,
         native_unit=CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
     ),
     SensorDescription(
         key="wifi_signal",
         name="Wi-Fi Signal",
-        detail=frigidaire.Detail.NETWORK_INTERFACE,
-        value_fn=network_rssi,
+        value_fn=lambda appliance: appliance.wifi_rssi,
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         native_unit=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
         entity_category=EntityCategory.DIAGNOSTIC,
         # Useful when diagnosing a flaky appliance, noise the rest of the time.
         enabled_default=False,
-        attributes_fn=_link_quality_attributes,
+        attributes_fn=lambda appliance: (
+            None if appliance.wifi_link_quality is None else {"link_quality": appliance.wifi_link_quality}
+        ),
+    ),
+    SensorDescription(
+        key="filter_runtime",
+        name="Filter Runtime",
+        value_fn=lambda appliance: appliance.filter_runtime_seconds,
+        device_class=SensorDeviceClass.DURATION,
+        native_unit=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        icon="mdi:air-filter",
+        option=CONF_FILTER_RUNTIME_SENSOR,
     ),
 )
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+def _wanted(description: SensorDescription, appliance: Appliance, options: Mapping[str, Any]) -> bool:
+    if description.destination is not None and appliance.destination is not description.destination:
+        return False
+    if description.option is not None:
+        return bool(options.get(description.option, False))
+    return description.value_fn(appliance) is not None
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: FrigidaireConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     """Set up frigidaire sensor entities from a config entry."""
-    coordinators: dict[str, FrigidaireApplianceCoordinator] = hass.data[DOMAIN][entry.entry_id]["coordinators"]
-    appliances: list[frigidaire.Appliance] = hass.data[DOMAIN][entry.entry_id]["appliances"]
-    options: dict[str, dict[str, bool]] = entry.options
-
-    entities: list[SensorEntity] = [
-        FrigidaireTemperatureSensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
-        for appliance in appliances
-        if appliance.destination == frigidaire.Destination.DEHUMIDIFIER
-        # Only dehumidifiers that actually report an ambient temperature get a
-        # sensor; the coordinator's data is primed before platform setup, so
-        # this reflects the device's real capabilities.
-        and _reports_temperature(coordinators[appliance.appliance_id].data or {})
-    ]
-    entities += [
-        FrigidaireFilterRuntimeSensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
-        for appliance in appliances
-        if options.get(appliance.appliance_id, {}).get(CONF_FILTER_RUNTIME_SENSOR, False)
-    ]
-    # Reported-detail sensors apply to every appliance type. Creation is gated on the
-    # appliance actually reporting a usable value, which the primed coordinator data
-    # already tells us, so no extra API call is needed to detect capabilities.
-    entities += [
-        FrigidaireDetailSensor(
-            coordinators[appliance.appliance_id], description, suggest_area(hass, appliance.nickname)
-        )
-        for appliance in appliances
+    coordinator = entry.runtime_data
+    async_add_entities(
+        FrigidaireSensor(coordinator, appliance, description)
+        for appliance in coordinator.data.values()
         for description in SENSOR_DESCRIPTIONS
-        if description.value_fn((coordinators[appliance.appliance_id].data or {}).get(description.detail)) is not None
-    ]
-
-    async_add_entities(entities)
+        if _wanted(description, appliance, entry.options.get(appliance.appliance_id, {}))
+    )
 
 
-class FrigidaireTemperatureSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], SensorEntity):
-    """Ambient temperature reported by a Frigidaire dehumidifier."""
+class FrigidaireSensor(FrigidaireEntity, SensorEntity):
+    """A sensor backed by one reported value."""
 
-    _attr_device_class = SensorDeviceClass.TEMPERATURE
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None) -> None:
-        super().__init__(coordinator)
-        self._appliance = coordinator.appliance
-        self._attr_unique_id = f"{self._appliance.appliance_id}_temperature"
-        self._attr_name = "Temperature"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._appliance.appliance_id)},
-            name=self._appliance.nickname,
-            manufacturer="Frigidaire",
-            suggested_area=suggested_area,
+    def __init__(self, coordinator: FrigidaireCoordinator, appliance: Appliance, description: SensorDescription):
+        super().__init__(
+            coordinator, appliance, unique_id=f"{appliance.appliance_id}_{description.key}", name=description.name
         )
-
-    @property
-    def _details(self) -> dict:
-        return self.coordinator.data or {}
-
-    @property
-    def native_unit_of_measurement(self) -> str:
-        """Return the unit the device is reporting temperature in.
-
-        Prefer the device's stated representation; if that's missing, infer it
-        from whichever ambient value is present so the unit always matches
-        native_value.
-        """
-        unit = FRIGIDAIRE_TO_HA_UNIT.get(_normalize(self._details.get(frigidaire.Detail.TEMPERATURE_REPRESENTATION)))
-        if unit is not None:
-            return unit
-        if (
-            self._details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_F) is None
-            and self._details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_C) is not None
-        ):
-            return UnitOfTemperature.CELSIUS
-        return UnitOfTemperature.FAHRENHEIT
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the current ambient temperature in native_unit_of_measurement."""
-        if self.native_unit_of_measurement == UnitOfTemperature.CELSIUS:
-            return self._details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_C)
-        return self._details.get(frigidaire.Detail.AMBIENT_TEMPERATURE_F)
-
-
-class FrigidaireFilterRuntimeSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], SensorEntity):
-    """Report cumulative air-filter runtime from the owning appliance entity."""
-
-    _attr_device_class = SensorDeviceClass.DURATION
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:air-filter"
-    _attr_native_unit_of_measurement = UnitOfTime.SECONDS
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-
-    def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None) -> None:
-        super().__init__(coordinator)
-        self._appliance = coordinator.appliance
-        self._attr_unique_id = f"{self._appliance.appliance_id}_filter_runtime"
-        self._attr_name = "Filter Runtime"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._appliance.appliance_id)},
-            name=self._appliance.nickname,
-            manufacturer="Frigidaire",
-            suggested_area=suggested_area,
-        )
-
-    @property
-    def _runtime_seconds(self) -> float | None:
-        return filter_runtime_seconds((self.coordinator.data or {}).get(AIR_FILTER_LIFETIME_KEY))
-
-    @property
-    def available(self) -> bool:
-        return super().available and self._runtime_seconds is not None
-
-    @property
-    def native_value(self) -> float | None:
-        return self._runtime_seconds
-
-
-class FrigidaireDetailSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], SensorEntity):
-    """A sensor backed by a single reported detail, described by SENSOR_DESCRIPTIONS."""
-
-    def __init__(
-        self,
-        coordinator: FrigidaireApplianceCoordinator,
-        description: SensorDescription,
-        suggested_area: str | None = None,
-    ) -> None:
-        super().__init__(coordinator)
-        self._appliance = coordinator.appliance
-        self._desc = description
-        self._attr_unique_id = f"{self._appliance.appliance_id}_{description.key}"
-        self._attr_name = description.name
+        self._description = description
         self._attr_device_class = description.device_class
-        self._attr_native_unit_of_measurement = description.native_unit
         self._attr_state_class = description.state_class
         self._attr_entity_category = description.entity_category
         self._attr_entity_registry_enabled_default = description.enabled_default
-        self._attr_suggested_display_precision = description.suggested_display_precision
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._appliance.appliance_id)},
-            name=self._appliance.nickname,
-            manufacturer="Frigidaire",
-            suggested_area=suggested_area,
-        )
+        self._attr_icon = description.icon
 
     @property
-    def _raw(self) -> Any:
-        return (self.coordinator.data or {}).get(self._desc.detail)
-
-    @property
-    def available(self) -> bool:
-        # An appliance can stop reporting a detail (or report a placeholder) while staying
-        # online, so fall back to unavailable rather than holding a stale reading.
-        return super().available and self._desc.value_fn(self._raw) is not None
+    def native_unit_of_measurement(self) -> str | None:
+        if self._description.native_unit_fn is not None:
+            return self._description.native_unit_fn(self.appliance)
+        return self._description.native_unit
 
     @property
     def native_value(self) -> float | None:
-        return self._desc.value_fn(self._raw)
+        return self._description.value_fn(self.appliance)
+
+    @property
+    def available(self) -> bool:
+        # An appliance can stop reporting a value (or report a placeholder) while staying
+        # online, so go unavailable rather than holding a stale reading.
+        return super().available and self.native_value is not None
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:
-        if self._desc.attributes_fn is None:
+        if self._description.attributes_fn is None:
             return None
-        return self._desc.attributes_fn(self._raw)
+        return self._description.attributes_fn(self.appliance)

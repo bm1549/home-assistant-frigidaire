@@ -2,219 +2,145 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-import frigidaire
+from frigidaire import Appliance, Destination, Detail
 
-from .const import (
-    CONF_BUCKET_STATUS_SENSOR,
-    CONF_CHECK_FILTER_SENSOR,
-    CONF_COMPRESSOR_ESTIMATE,
-    DOMAIN,
+from .const import CONF_BUCKET_STATUS_SENSOR, CONF_CHECK_FILTER_SENSOR, CONF_COMPRESSOR_ESTIMATE
+from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
+from .entity import FrigidaireEntity
+
+
+@dataclass(frozen=True, kw_only=True)
+class BinarySensorDescription:
+    """A binary sensor derived from the appliance snapshot (and, for the estimate, the coordinator).
+
+    Sensors without an ``option`` are created only when the appliance reports the value.
+    Opt-in sensors are created when their option is on and go unavailable while the value
+    is unknown, so models that never report it show that rather than a misleading "off".
+    """
+
+    key: str
+    name: str
+    is_on: Callable[[FrigidaireCoordinator, Appliance], bool | None]
+    device_class: BinarySensorDeviceClass | None = None
+    translation_key: str | None = None
+    icon_fn: Callable[[bool | None], str | None] | None = None
+    attributes_fn: Callable[[Appliance], Mapping[str, Any] | None] | None = None
+    destination: Destination | None = None
+    option: str | None = None
+
+
+def _filter_state(appliance: Appliance) -> Mapping[str, Any] | None:
+    raw = appliance.get(Detail.FILTER_STATE)
+    return None if raw is None else {"filter_state": str(raw).upper()}
+
+
+BINARY_SENSOR_DESCRIPTIONS = (
+    # Distinguishes a genuinely offline appliance from stale values: a disconnected
+    # appliance keeps serving its last-known state, so every other entity looks healthy.
+    BinarySensorDescription(
+        key="connectivity",
+        name="Connectivity",
+        is_on=lambda _coordinator, appliance: appliance.is_connected,
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        attributes_fn=lambda appliance: (
+            None if appliance.connection_state is None else {"connection_state": appliance.connection_state.value}
+        ),
+    ),
+    BinarySensorDescription(
+        key="check_filter",
+        name="Check Filter",
+        is_on=lambda _coordinator, appliance: appliance.filter_needs_attention,
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        attributes_fn=_filter_state,
+        option=CONF_CHECK_FILTER_SENSOR,
+    ),
+    # No device_class so the bucket_status translation renders Full/Empty.
+    BinarySensorDescription(
+        key="bucket_status",
+        name="Bucket Status",
+        is_on=lambda _coordinator, appliance: appliance.bucket_full,
+        translation_key="bucket_status",
+        icon_fn=lambda is_on: "mdi:water-alert" if is_on else "mdi:cup-water",
+        destination=Destination.DEHUMIDIFIER,
+        option=CONF_BUCKET_STATUS_SENSOR,
+    ),
+    BinarySensorDescription(
+        key="compressor",
+        name="Compressor Estimate",
+        is_on=lambda coordinator, appliance: coordinator.compressor_estimate(appliance.appliance_id),
+        device_class=BinarySensorDeviceClass.RUNNING,
+        destination=Destination.AIR_CONDITIONER,
+        option=CONF_COMPRESSOR_ESTIMATE,
+    ),
 )
-from .coordinator import FrigidaireApplianceCoordinator
-from .diagnostics import bucket_is_full, filter_needs_attention, normalize_alerts, normalize_filter_state
-from .helpers import suggest_area
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
+def _wanted(
+    description: BinarySensorDescription,
+    coordinator: FrigidaireCoordinator,
+    appliance: Appliance,
+    options: Mapping[str, Any],
+) -> bool:
+    if description.destination is not None and appliance.destination is not description.destination:
+        return False
+    if description.option is not None:
+        return bool(options.get(description.option, False))
+    return description.is_on(coordinator, appliance) is not None
+
+
+async def async_setup_entry(
+    hass: HomeAssistant, entry: FrigidaireConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     """Set up frigidaire binary sensor entities from a config entry."""
-    coordinators: dict[str, FrigidaireApplianceCoordinator] = hass.data[DOMAIN][entry.entry_id]["coordinators"]
-    appliances: list[frigidaire.Appliance] = hass.data[DOMAIN][entry.entry_id]["appliances"]
-    options: dict[str, dict[str, bool]] = entry.options
-
-    # Connectivity is meaningful for every appliance and needs no per-device opt-in, so
-    # unlike the check-filter sensor it has no key in const.BINARY_SENSOR_OPTIONS — and it
-    # is created even when the entry has no options set at all.
-    entities: list[BinarySensorEntity] = [
-        FrigidaireConnectivitySensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
-        for appliance in appliances
-        if coordinators[appliance.appliance_id].connection_state is not None
-    ]
-
-    entities += [
-        FrigidaireCheckFilterSensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
-        for appliance in appliances
-        if options.get(appliance.appliance_id, {}).get(CONF_CHECK_FILTER_SENSOR, False)
-    ]
-    entities += [
-        FrigidaireBucketStatusSensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
-        for appliance in appliances
-        # Only dehumidifiers have a water bucket.
-        if appliance.destination == frigidaire.Destination.DEHUMIDIFIER
-        and options.get(appliance.appliance_id, {}).get(CONF_BUCKET_STATUS_SENSOR, False)
-    ]
-    entities += [
-        FrigidaireCompressorEstimateSensor(coordinators[appliance.appliance_id], suggest_area(hass, appliance.nickname))
-        for appliance in appliances
-        if appliance.destination == frigidaire.Destination.AIR_CONDITIONER
-        and options.get(appliance.appliance_id, {}).get(CONF_COMPRESSOR_ESTIMATE, False)
-    ]
-
-    async_add_entities(entities)
+    coordinator = entry.runtime_data
+    async_add_entities(
+        FrigidaireBinarySensor(coordinator, appliance, description)
+        for appliance in coordinator.data.values()
+        for description in BINARY_SENSOR_DESCRIPTIONS
+        if _wanted(description, coordinator, appliance, entry.options.get(appliance.appliance_id, {}))
+    )
 
 
-class FrigidaireConnectivitySensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
-    """Binary sensor that is ON while the cloud reports the appliance as connected.
+class FrigidaireBinarySensor(FrigidaireEntity, BinarySensorEntity):
+    """A binary sensor backed by one derived value."""
 
-    This distinguishes a genuinely offline appliance from one whose reported values have
-    simply gone stale — the rest of the integration cannot tell the difference, because a
-    disconnected appliance keeps returning its last-known reported properties.
-    """
-
-    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
-    def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None) -> None:
-        super().__init__(coordinator)
-        self._appliance = coordinator.appliance
-        self._attr_unique_id = f"{self._appliance.appliance_id}_connectivity"
-        self._attr_name = "Connectivity"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._appliance.appliance_id)},
-            name=self._appliance.nickname,
-            manufacturer="Frigidaire",
-            suggested_area=suggested_area,
+    def __init__(
+        self, coordinator: FrigidaireCoordinator, appliance: Appliance, description: BinarySensorDescription
+    ) -> None:
+        super().__init__(
+            coordinator, appliance, unique_id=f"{appliance.appliance_id}_{description.key}", name=description.name
         )
-
-    @property
-    def available(self) -> bool:
-        # Like every other entity, go unavailable when the poll itself fails: a cached
-        # "connected" during an API outage would be misleading.
-        return super().available and self.coordinator.is_connected is not None
-
-    @property
-    def extra_state_attributes(self) -> Mapping[str, Any] | None:
-        state = self.coordinator.connection_state
-        return None if state is None else {"connection_state": state}
+        self._description = description
+        self._attr_device_class = description.device_class
+        self._attr_translation_key = description.translation_key
 
     @property
     def is_on(self) -> bool | None:
-        return self.coordinator.is_connected
-
-
-class FrigidaireCheckFilterSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
-    """Binary sensor that is ON when the filter needs attention."""
-
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None) -> None:
-        super().__init__(coordinator)
-        self._appliance = coordinator.appliance
-        self._attr_unique_id = f"{self._appliance.appliance_id}_check_filter"
-        self._attr_name = "Check Filter"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._appliance.appliance_id)},
-            name=self._appliance.nickname,
-            manufacturer="Frigidaire",
-            suggested_area=suggested_area,
-        )
-
-    @property
-    def _details(self) -> dict:
-        return self.coordinator.data or {}
+        return self._description.is_on(self.coordinator, self.appliance)
 
     @property
     def available(self) -> bool:
-        return (
-            super().available and normalize_filter_state(self._details.get(frigidaire.Detail.FILTER_STATE)) is not None
-        )
+        return super().available and self.is_on is not None
 
     @property
-    def extra_state_attributes(self) -> Mapping[str, Any] | None:
-        filter_state = normalize_filter_state(self._details.get(frigidaire.Detail.FILTER_STATE))
-        if filter_state is None:
+    def icon(self) -> str | None:
+        if self._description.icon_fn is None:
             return None
-        return {"filter_state": filter_state}
+        return self._description.icon_fn(self.is_on)
 
     @property
-    def is_on(self) -> bool | None:
-        return filter_needs_attention(self._details.get(frigidaire.Detail.FILTER_STATE))
-
-
-class FrigidaireBucketStatusSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
-    """Binary sensor that is ON when the dehumidifier's water bucket is full.
-
-    Displayed states are "Full" (on) and "Empty" (off) via the bucket_status
-    translation key; no device_class is set so the custom states render instead
-    of a device-class pair.
-    """
-
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_translation_key = "bucket_status"
-
-    def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None) -> None:
-        super().__init__(coordinator)
-        self._appliance = coordinator.appliance
-        self._attr_unique_id = f"{self._appliance.appliance_id}_bucket_status"
-        self._attr_name = "Bucket Status"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._appliance.appliance_id)},
-            name=self._appliance.nickname,
-            manufacturer="Frigidaire",
-            suggested_area=suggested_area,
-        )
-
-    @property
-    def _details(self) -> dict:
-        return self.coordinator.data or {}
-
-    @property
-    def _bucket_full(self) -> bool | None:
-        """None when this model reports no bucket signal at all."""
-        return bucket_is_full(
-            normalize_alerts(self._details.get(frigidaire.Detail.ALERTS)),
-            self._details.get(frigidaire.Detail.WATER_BUCKET_LEVEL),
-            self._details.get(frigidaire.Detail.WATER_TANK_FULL),
-        )
-
-    @property
-    def available(self) -> bool:
-        # Mirror the capability gating used elsewhere: models that never report
-        # a bucket signal show as unavailable rather than a misleading "Empty".
-        return super().available and self._bucket_full is not None
-
-    @property
-    def is_on(self) -> bool | None:
-        return self._bucket_full
-
-    @property
-    def icon(self) -> str:
-        return "mdi:water-alert" if self.is_on else "mdi:cup-water"
-
-
-class FrigidaireCompressorEstimateSensor(CoordinatorEntity[FrigidaireApplianceCoordinator], BinarySensorEntity):
-    """Expose the coordinator's opt-in compressor estimate."""
-
-    _attr_device_class = BinarySensorDeviceClass.RUNNING
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator: FrigidaireApplianceCoordinator, suggested_area: str | None = None) -> None:
-        super().__init__(coordinator)
-        self._appliance = coordinator.appliance
-        self._attr_unique_id = f"{self._appliance.appliance_id}_compressor"
-        self._attr_name = "Compressor Estimate"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._appliance.appliance_id)},
-            name=self._appliance.nickname,
-            manufacturer="Frigidaire",
-            suggested_area=suggested_area,
-        )
-
-    @property
-    def available(self) -> bool:
-        return super().available and self.coordinator.compressor_running is not None
-
-    @property
-    def is_on(self) -> bool | None:
-        return self.coordinator.compressor_running
+    def extra_state_attributes(self) -> Mapping[str, Any] | None:
+        if self._description.attributes_fn is None:
+            return None
+        return self._description.attributes_fn(self.appliance)

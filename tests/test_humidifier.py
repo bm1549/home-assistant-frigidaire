@@ -1,9 +1,9 @@
 """Humidifier entity behaviour for dehumidifiers."""
 
 import pytest
+from frigidaire.testing import DEHUMIDIFIER, with_reported
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from payloads import DEHUMIDIFIER, with_reported
 
 
 def humidifier_id(hass: HomeAssistant) -> str:

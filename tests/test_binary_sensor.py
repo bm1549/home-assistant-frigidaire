@@ -1,8 +1,8 @@
 """Opt-in binary sensors."""
 
+from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC, with_reported
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from payloads import DEHUMIDIFIER, LEGACY_AC, with_reported
 
 BUCKET_ENABLED = {"DH-1": {"bucket_status": True}}
 
