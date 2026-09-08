@@ -77,7 +77,7 @@ DEHUMIDIFIER: dict = {
             "sensorHumidity": 55,
             "targetHumidity": 45,
             "waterBucketLevel": 0,
-            "displayLight": "ON",
+            "displayLight": "DISPLAY_LIGHT_1",
             "cleanAirMode": "OFF",
             "uiLockMode": False,
             "alerts": [],
