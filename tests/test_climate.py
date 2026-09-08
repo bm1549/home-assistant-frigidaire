@@ -126,3 +126,18 @@ async def test_hvac_action_falls_back_to_drying_for_dry_mode(hass: HomeAssistant
     await setup_entry([with_reported(LEGACY_AC, mode="DRY")])
 
     assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "drying"
+
+
+async def test_reported_fan_speed_attributes(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([LEGACY_AC])  # fanSpeedState LOW
+
+    attributes = hass.states.get(climate_id(hass)).attributes
+    assert attributes["reported_fan_speed"] == "low"
+    assert attributes["current_fan_speed"] == "low"
+
+
+async def test_unknown_reported_fan_speed_is_still_exposed(hass: HomeAssistant, setup_entry) -> None:
+    """A speed this integration does not know is passed through lowercased, as it always was."""
+    await setup_entry([with_reported(LEGACY_AC, fanSpeedState="TURBO")])
+
+    assert hass.states.get(climate_id(hass)).attributes["reported_fan_speed"] == "turbo"

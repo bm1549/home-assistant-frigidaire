@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.switch import SwitchEntity
+from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -23,6 +23,7 @@ class SwitchDescription:
     icon: str
     is_on: Callable[[Appliance], bool | None]
     set: Callable[[Frigidaire, Appliance, bool], None]
+    device_class: SwitchDeviceClass | None = None
 
 
 SWITCH_DESCRIPTIONS = (
@@ -46,6 +47,7 @@ SWITCH_DESCRIPTIONS = (
         icon="mdi:lock",
         is_on=lambda appliance: appliance.ui_locked,
         set=lambda client, appliance, on: client.set_ui_lock(appliance, on),
+        device_class=SwitchDeviceClass.SWITCH,
     ),
 )
 
@@ -72,6 +74,7 @@ class FrigidaireSwitch(FrigidaireEntity, SwitchEntity):
         )
         self._description = description
         self._attr_icon = description.icon
+        self._attr_device_class = description.device_class
 
     @property
     def is_on(self) -> bool | None:

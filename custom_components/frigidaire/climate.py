@@ -203,8 +203,9 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
         appliance = self.appliance
         attributes: dict[str, Any] = {"check_filter": appliance.filter_needs_attention or False}
         # The reported speed can resolve an AUTO setting to a concrete level, but may hold
-        # its last value while the appliance is off.
-        if (reported := FRIGIDAIRE_TO_HA_FAN_SPEED.get(appliance.fan_speed_state)) is not None:
+        # its last value while the appliance is off. Unknown speeds pass through lowercased.
+        if (raw_speed := appliance.get(Detail.FAN_SPEED_STATE)) is not None:
+            reported = FRIGIDAIRE_TO_HA_FAN_SPEED.get(appliance.fan_speed_state, str(raw_speed).lower())
             attributes["reported_fan_speed"] = reported
             attributes["current_fan_speed"] = reported  # legacy alias for existing templates
         if appliance.alerts is not None:
