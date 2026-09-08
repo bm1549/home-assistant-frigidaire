@@ -158,3 +158,28 @@ async def test_renamed_appliance_keeps_its_identity(hass: HomeAssistant, setup_e
 
     assert entry.runtime_data.data["AC-LEGACY-1"].nickname == "Guest Room AC"
     assert state_of(hass, "climate", "AC-LEGACY-1") == "cool"
+
+
+async def test_appliance_added_to_the_account_gets_entities_without_a_reload(hass: HomeAssistant, setup_entry) -> None:
+    _entry, stub = await setup_entry([LEGACY_AC])
+    assert er.async_get(hass).async_get_entity_id("humidifier", DOMAIN, "DH-1") is None
+
+    stub.records["DH-1"] = DEHUMIDIFIER
+    await poll(hass)
+
+    assert state_of(hass, "humidifier", "DH-1") == "on"
+    assert er.async_get(hass).async_get_entity_id("sensor", DOMAIN, "DH-1_humidity") is not None
+    assert er.async_get(hass).async_get_entity_id("binary_sensor", DOMAIN, "DH-1_connectivity") is not None
+
+
+async def test_returning_appliance_is_not_added_twice(hass: HomeAssistant, setup_entry) -> None:
+    _entry, stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
+    record = stub.records.pop("DH-1")
+    await poll(hass)
+    stub.records["DH-1"] = record
+    await poll(hass)
+
+    registry = er.async_get(hass)
+    humidifiers = [e for e in registry.entities.values() if e.domain == "humidifier"]
+    assert len(humidifiers) == 1
+    assert state_of(hass, "humidifier", "DH-1") == "on"

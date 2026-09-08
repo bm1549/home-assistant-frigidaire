@@ -27,7 +27,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from frigidaire import ApplianceState, Destination, Detail, FanSpeed, Mode, Unit
 
 from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
-from .entity import FrigidaireEntity, Optimistic
+from .entity import FrigidaireEntity, Optimistic, async_add_appliance_entities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,11 +36,14 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: FrigidaireConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up frigidaire from a config entry."""
-    coordinator = entry.runtime_data
-    async_add_entities(
-        FrigidaireClimate(coordinator, appliance)
-        for appliance in coordinator.data.values()
-        if appliance.destination is Destination.AIR_CONDITIONER
+    async_add_appliance_entities(
+        entry.runtime_data,
+        async_add_entities,
+        lambda appliance: (
+            [FrigidaireClimate(entry.runtime_data, appliance)]
+            if appliance.destination is Destination.AIR_CONDITIONER
+            else []
+        ),
     )
 
 
@@ -164,6 +167,13 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
         appliance = self.appliance
         if appliance.state is not ApplianceState.RUNNING:
             return HVACAction.IDLE
+        # Real compressor telemetry, on models that report it, beats every inference below.
+        compressor = appliance.compressor_running
+        if compressor is True:
+            return HVACAction.DRYING if hvac_mode == HVACMode.DRY else HVACAction.COOLING
+        if compressor is False:
+            fan_running = appliance.mode_state is Mode.FAN or hvac_mode == HVACMode.FAN_ONLY
+            return HVACAction.FAN if fan_running else HVACAction.IDLE
         # The reported running mode wins: in ECO the requested mode says nothing about
         # whether the unit is cooling or just running the fan right now. hvac_mode stays on
         # the requested mode, which is the user's selection and must not flap.

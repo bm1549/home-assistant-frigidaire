@@ -47,6 +47,11 @@ cloud response the climate and dehumidifier entities already use.
 | PM2.5 | PM2.5 sensor | Particulate concentration in µg/m³, on appliances with an air-quality sensor |
 | Wi-Fi Signal | Signal strength sensor | RSSI in dBm plus a `link_quality` attribute. Diagnostic and **disabled by default** — enable it from the device page when troubleshooting |
 | Connectivity | Connectivity binary sensor | Whether the cloud can currently reach the appliance. Worth alerting on: a disconnected appliance keeps serving its last-known values, so every other entity looks healthy while its data silently goes stale |
+| Compressor | Running binary sensor | Real compressor state, on models that report it (Husky and Eagle dehumidifiers do). Also drives `hvac_action` on an AC and `action` on a dehumidifier that reports it |
+| Condensate Pump | Running binary sensor | Diagnostic, on models that report it |
+| HEPA Filter Inserted | Binary sensor | Diagnostic, on models that report it |
+| Compressor Runtime, Total Runtime | Duration sensors | Lifetime counters on models that report them. Diagnostic and **disabled by default** |
+| On Timer, Off Timer | Number | Always on air conditioners; on dehumidifiers that report timers |
 
 `pm10` is deliberately **not** exposed. On the appliances observed so far it alternates
 between a fixed placeholder value and a value identical to `pm25`, so it carries no
@@ -103,6 +108,12 @@ cannot override the Frigidaire climate entity's own `hvac_action` property.
 3. Restart Home Assistant.
 4. Go to **Settings → Devices & Services → Add Integration** and search for **Frigidaire**.
 5. Enter your Frigidaire account email and password.
+
+Appliances added to your Frigidaire account appear on the next poll without a reload.
+
+## Reporting a problem
+
+Open the device page, choose **Download diagnostics** from its menu, and attach the file to the issue. It contains the raw cloud record for that appliance with account and appliance identifiers removed, which is what every model-specific fix has needed.
 
 ## Reconfiguring Optional Entities
 

@@ -10,7 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from frigidaire import Appliance, ApplianceState, Destination
 
 from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
-from .entity import FrigidaireEntity, Optimistic
+from .entity import FrigidaireEntity, Optimistic, async_add_appliance_entities
 
 STEP_SECONDS = 1800  # the appliance snaps timers to 30 minutes
 MAX_SECONDS = 86400  # 24 hours
@@ -19,14 +19,15 @@ MAX_SECONDS = 86400  # 24 hours
 async def async_setup_entry(
     hass: HomeAssistant, entry: FrigidaireConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
-    """Set up the timer entities for every air conditioner."""
-    coordinator = entry.runtime_data
-    async_add_entities(
-        FrigidaireTimerNumber(coordinator, appliance, timer_type)
-        for appliance in coordinator.data.values()
-        if appliance.destination is Destination.AIR_CONDITIONER
-        for timer_type in ("on", "off")
-    )
+    """Timers for every air conditioner, and for any other appliance that reports them."""
+
+    def build(appliance: Appliance) -> list[FrigidaireTimerNumber]:
+        has_timers = appliance.start_time is not None or appliance.stop_time is not None
+        if appliance.destination is not Destination.AIR_CONDITIONER and not has_timers:
+            return []
+        return [FrigidaireTimerNumber(entry.runtime_data, appliance, timer_type) for timer_type in ("on", "off")]
+
+    async_add_appliance_entities(entry.runtime_data, async_add_entities, build)
 
 
 class FrigidaireTimerNumber(FrigidaireEntity, NumberEntity):

@@ -141,3 +141,20 @@ async def test_unknown_reported_fan_speed_is_still_exposed(hass: HomeAssistant, 
     await setup_entry([with_reported(LEGACY_AC, fanSpeedState="TURBO")])
 
     assert hass.states.get(climate_id(hass)).attributes["reported_fan_speed"] == "turbo"
+
+
+async def test_reported_compressor_state_beats_everything_else(hass: HomeAssistant, setup_entry) -> None:
+    """Real telemetry, where a model reports it, decides hvac_action."""
+    await setup_entry([with_reported(LEGACY_AC, mode="COOL", compressorState="off")])
+    assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "idle"
+
+
+async def test_compressor_on_in_dry_mode_is_drying(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(LEGACY_AC, mode="DRY", compressorState="on")])
+    assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "drying"
+
+
+async def test_compressor_off_with_fan_running_is_fan(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(TELICA_AC, mode="eco", modeState="fanOnly", compressorState="off")])
+    entity_id = er.async_get(hass).async_get_entity_id("climate", "frigidaire", "AC-TELICA-1")
+    assert hass.states.get(entity_id).attributes["hvac_action"] == "fan"

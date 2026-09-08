@@ -115,3 +115,19 @@ async def test_record_without_properties_makes_that_entity_unavailable(hass: Hom
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert hass.states.get(entity_id_for(hass, "climate", "AC-LEGACY-1")).state == "unavailable"
+
+
+async def test_dehumidifier_reporting_timers_gets_timer_entities(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(DEHUMIDIFIER, startTime=-1, stopTime=1800)])
+
+    on_timer = entity_id_for(hass, "number", "DH-1_timer_on")
+    off_timer = entity_id_for(hass, "number", "DH-1_timer_off")
+    assert on_timer is not None and off_timer is not None
+    assert hass.states.get(on_timer).state == "0"  # -1 means not set; the unit is running anyway
+    assert hass.states.get(off_timer).state == "1800"
+
+
+async def test_dehumidifier_without_timers_gets_none(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([DEHUMIDIFIER])
+
+    assert entity_id_for(hass, "number", "DH-1_timer_on") is None

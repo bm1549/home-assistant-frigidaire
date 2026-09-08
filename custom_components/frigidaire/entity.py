@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Iterable
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from frigidaire import Appliance, Frigidaire
@@ -23,6 +26,34 @@ def suggest_area(hass: HomeAssistant, nickname: str) -> str | None:
     nickname_lower = nickname.lower()
     areas = (area.name for area in ar.async_get(hass).areas.values() if area.name.lower() in nickname_lower)
     return max(areas, key=len, default=None)
+
+
+def async_add_appliance_entities(
+    coordinator: FrigidaireCoordinator,
+    async_add_entities: AddEntitiesCallback,
+    build: Callable[[Appliance], Iterable[Entity]],
+) -> None:
+    """Create a platform's entities for every appliance now, and for any that joins the account later.
+
+    Each appliance is offered to ``build`` once, when first seen, so an appliance that drops off
+    the account and returns keeps its existing entities.
+    """
+    known: set[str] = set()
+
+    @callback
+    def add_new() -> None:
+        entities: list[Entity] = []
+        for appliance_id, appliance in (coordinator.data or {}).items():
+            if appliance_id in known:
+                continue
+            known.add(appliance_id)
+            entities.extend(build(appliance))
+        if entities:
+            async_add_entities(entities)
+
+    add_new()
+    assert coordinator.config_entry is not None
+    coordinator.config_entry.async_on_unload(coordinator.async_add_listener(add_new))
 
 
 class Optimistic:

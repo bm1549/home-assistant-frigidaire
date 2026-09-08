@@ -13,7 +13,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from frigidaire import Appliance, Frigidaire
 
 from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
-from .entity import FrigidaireEntity
+from .entity import FrigidaireEntity, async_add_appliance_entities
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -56,12 +56,14 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: FrigidaireConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Create the switches enabled per device in the entry options."""
-    coordinator = entry.runtime_data
-    async_add_entities(
-        FrigidaireSwitch(coordinator, appliance, description)
-        for appliance in coordinator.data.values()
-        for description in SWITCH_DESCRIPTIONS
-        if entry.options.get(appliance.appliance_id, {}).get(description.key, False)
+    async_add_appliance_entities(
+        entry.runtime_data,
+        async_add_entities,
+        lambda appliance: [
+            FrigidaireSwitch(entry.runtime_data, appliance, description)
+            for description in SWITCH_DESCRIPTIONS
+            if entry.options.get(appliance.appliance_id, {}).get(description.key, False)
+        ],
     )
 
 

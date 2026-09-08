@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.components.humidifier import HumidifierDeviceClass, HumidifierEntity
+from homeassistant.components.humidifier import HumidifierAction, HumidifierDeviceClass, HumidifierEntity
 from homeassistant.components.humidifier.const import (
     MODE_AUTO,
     MODE_BOOST,
@@ -23,7 +23,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from frigidaire import ApplianceState, Destination, Detail, FanSpeed, Mode
 
 from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
-from .entity import FrigidaireEntity
+from .entity import FrigidaireEntity, async_add_appliance_entities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,11 +39,14 @@ async def async_setup_entry(
     platform = entity_platform.async_get_current_platform()
     platform.async_register_entity_service("set_fan_mode", {vol.Required("fan_mode"): cv.string}, "set_fan_mode")
 
-    coordinator = entry.runtime_data
-    async_add_entities(
-        FrigidaireDehumidifier(coordinator, appliance)
-        for appliance in coordinator.data.values()
-        if appliance.destination is Destination.DEHUMIDIFIER
+    async_add_appliance_entities(
+        entry.runtime_data,
+        async_add_entities,
+        lambda appliance: (
+            [FrigidaireDehumidifier(entry.runtime_data, appliance)]
+            if appliance.destination is Destination.DEHUMIDIFIER
+            else []
+        ),
     )
 
 
@@ -91,6 +94,16 @@ class FrigidaireDehumidifier(FrigidaireEntity, HumidifierEntity):
     @property
     def is_on(self) -> bool:
         return self.appliance.state is ApplianceState.RUNNING
+
+    @property
+    def action(self) -> HumidifierAction | None:
+        """What the unit is doing, on models that report the compressor; None elsewhere."""
+        compressor = self.appliance.compressor_running
+        if compressor is None:
+            return None
+        if not self.is_on:
+            return HumidifierAction.OFF
+        return HumidifierAction.DRYING if compressor else HumidifierAction.IDLE
 
     @property
     def target_humidity(self) -> float | None:

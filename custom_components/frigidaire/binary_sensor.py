@@ -15,7 +15,7 @@ from frigidaire import Appliance, Destination, Detail
 
 from .const import CONF_BUCKET_STATUS_SENSOR, CONF_CHECK_FILTER_SENSOR, CONF_COMPRESSOR_ESTIMATE
 from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
-from .entity import FrigidaireEntity
+from .entity import FrigidaireEntity, async_add_appliance_entities
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -31,6 +31,8 @@ class BinarySensorDescription:
     name: str
     is_on: Callable[[FrigidaireCoordinator, Appliance], bool | None]
     device_class: BinarySensorDeviceClass | None = None
+    entity_category: EntityCategory | None = EntityCategory.DIAGNOSTIC
+    icon: str | None = None
     translation_key: str | None = None
     icon_fn: Callable[[bool | None], str | None] | None = None
     attributes_fn: Callable[[Appliance], Mapping[str, Any] | None] | None = None
@@ -54,6 +56,27 @@ BINARY_SENSOR_DESCRIPTIONS = (
         attributes_fn=lambda appliance: (
             None if appliance.connection_state is None else {"connection_state": appliance.connection_state.value}
         ),
+    ),
+    # Real telemetry some dehumidifiers report (Husky/Eagle). Created only when present.
+    BinarySensorDescription(
+        key="compressor_state",
+        name="Compressor",
+        is_on=lambda _coordinator, appliance: appliance.compressor_running,
+        device_class=BinarySensorDeviceClass.RUNNING,
+        entity_category=None,
+    ),
+    BinarySensorDescription(
+        key="condensate_pump",
+        name="Condensate Pump",
+        is_on=lambda _coordinator, appliance: appliance.condensate_pump_running,
+        device_class=BinarySensorDeviceClass.RUNNING,
+        icon="mdi:pump",
+    ),
+    BinarySensorDescription(
+        key="hepa_filter",
+        name="HEPA Filter Inserted",
+        is_on=lambda _coordinator, appliance: appliance.hepa_filter_inserted,
+        icon="mdi:air-filter",
     ),
     BinarySensorDescription(
         key="check_filter",
@@ -102,18 +125,19 @@ async def async_setup_entry(
 ) -> None:
     """Set up frigidaire binary sensor entities from a config entry."""
     coordinator = entry.runtime_data
-    async_add_entities(
-        FrigidaireBinarySensor(coordinator, appliance, description)
-        for appliance in coordinator.data.values()
-        for description in BINARY_SENSOR_DESCRIPTIONS
-        if _wanted(description, coordinator, appliance, entry.options.get(appliance.appliance_id, {}))
+    async_add_appliance_entities(
+        coordinator,
+        async_add_entities,
+        lambda appliance: [
+            FrigidaireBinarySensor(coordinator, appliance, description)
+            for description in BINARY_SENSOR_DESCRIPTIONS
+            if _wanted(description, coordinator, appliance, entry.options.get(appliance.appliance_id, {}))
+        ],
     )
 
 
 class FrigidaireBinarySensor(FrigidaireEntity, BinarySensorEntity):
     """A binary sensor backed by one derived value."""
-
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self, coordinator: FrigidaireCoordinator, appliance: Appliance, description: BinarySensorDescription
@@ -123,6 +147,7 @@ class FrigidaireBinarySensor(FrigidaireEntity, BinarySensorEntity):
         )
         self._description = description
         self._attr_device_class = description.device_class
+        self._attr_entity_category = description.entity_category
         self._attr_translation_key = description.translation_key
 
     @property
@@ -135,9 +160,9 @@ class FrigidaireBinarySensor(FrigidaireEntity, BinarySensorEntity):
 
     @property
     def icon(self) -> str | None:
-        if self._description.icon_fn is None:
-            return None
-        return self._description.icon_fn(self.is_on)
+        if self._description.icon_fn is not None:
+            return self._description.icon_fn(self.is_on)
+        return self._description.icon
 
     @property
     def extra_state_attributes(self) -> Mapping[str, Any] | None:

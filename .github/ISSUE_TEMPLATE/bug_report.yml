@@ -1,0 +1,30 @@
+name: Bug report
+description: Something does not work with your appliance
+body:
+  - type: input
+    id: model
+    attributes:
+      label: Model number
+      placeholder: e.g. FHWW144TF1
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics file
+      description: >
+        Settings > Devices & services > Frigidaire > your appliance > three-dot menu > Download diagnostics.
+        Drag the file here. Account and appliance identifiers are already redacted.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log lines mentioning frigidaire, if any
+      render: text

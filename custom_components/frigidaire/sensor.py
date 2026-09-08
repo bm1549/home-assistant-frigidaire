@@ -22,7 +22,7 @@ from frigidaire import Appliance, Destination, Unit
 
 from .const import CONF_FILTER_RUNTIME_SENSOR
 from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
-from .entity import FrigidaireEntity
+from .entity import FrigidaireEntity, async_add_appliance_entities
 
 FRIGIDAIRE_TO_HA_UNIT = {
     Unit.FAHRENHEIT: UnitOfTemperature.FAHRENHEIT,
@@ -94,6 +94,29 @@ SENSOR_DESCRIPTIONS = (
             None if appliance.wifi_link_quality is None else {"link_quality": appliance.wifi_link_quality}
         ),
     ),
+    # Lifetime counters some dehumidifiers report. Maintenance data, so diagnostic and off by default.
+    SensorDescription(
+        key="compressor_runtime",
+        name="Compressor Runtime",
+        value_fn=lambda appliance: appliance.compressor_runtime_seconds,
+        device_class=SensorDeviceClass.DURATION,
+        native_unit=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
+        icon="mdi:timer-outline",
+    ),
+    SensorDescription(
+        key="total_runtime",
+        name="Total Runtime",
+        value_fn=lambda appliance: appliance.total_runtime_seconds,
+        device_class=SensorDeviceClass.DURATION,
+        native_unit=UnitOfTime.SECONDS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        enabled_default=False,
+        icon="mdi:timer-outline",
+    ),
     SensorDescription(
         key="filter_runtime",
         name="Filter Runtime",
@@ -120,12 +143,14 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: FrigidaireConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up frigidaire sensor entities from a config entry."""
-    coordinator = entry.runtime_data
-    async_add_entities(
-        FrigidaireSensor(coordinator, appliance, description)
-        for appliance in coordinator.data.values()
-        for description in SENSOR_DESCRIPTIONS
-        if _wanted(description, appliance, entry.options.get(appliance.appliance_id, {}))
+    async_add_appliance_entities(
+        entry.runtime_data,
+        async_add_entities,
+        lambda appliance: [
+            FrigidaireSensor(entry.runtime_data, appliance, description)
+            for description in SENSOR_DESCRIPTIONS
+            if _wanted(description, appliance, entry.options.get(appliance.appliance_id, {}))
+        ],
     )
 
 

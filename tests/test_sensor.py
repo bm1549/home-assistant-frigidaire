@@ -3,6 +3,7 @@
 from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC, TELICA_AC, with_reported
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity import EntityCategory
 
 
 def sensor_id(hass: HomeAssistant, unique_id: str) -> str | None:
@@ -49,3 +50,22 @@ async def test_placeholder_values_do_not_create_sensors(hass: HomeAssistant, set
 
     for key in ("humidity", "pm25", "wifi_signal"):
         assert sensor_id(hass, f"AC-TELICA-1_{key}") is None
+
+
+async def test_runtime_counters_are_diagnostic_and_disabled_by_default(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(DEHUMIDIFIER, compressorRuntime=1323904, totalRuntime=3613076)])
+
+    registry = er.async_get(hass)
+    for key in ("compressor_runtime", "total_runtime"):
+        entity_id = sensor_id(hass, f"DH-1_{key}")
+        assert entity_id is not None
+        entry = registry.async_get(entity_id)
+        assert entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+        assert entry.entity_category is EntityCategory.DIAGNOSTIC
+
+
+async def test_no_runtime_sensors_without_the_readings(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([DEHUMIDIFIER])
+
+    assert sensor_id(hass, "DH-1_compressor_runtime") is None
+    assert sensor_id(hass, "DH-1_total_runtime") is None
