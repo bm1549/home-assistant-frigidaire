@@ -22,7 +22,13 @@ from homeassistant.helpers.deprecation import (
     EnumWithDeprecatedMembers,
 )
 
-from scripts.check_deprecations import Finding, has_findings, render_markdown, scan_source
+from scripts.check_deprecations import (
+    Finding,
+    earliest_removal,
+    has_findings,
+    render_markdown,
+    scan_source,
+)
 from scripts.deprecation_pytest_plugin import DeprecationRecorder, breaks_in, is_deprecation
 
 
@@ -186,6 +192,24 @@ def test_recorder_keeps_one_entry_per_message() -> None:
 
 def _log_record(message: str) -> logging.LogRecord:
     return logging.LogRecord("homeassistant.const", logging.WARNING, __file__, 0, message, None, None)
+
+
+def test_title_deadline_is_the_soonest_removal() -> None:
+    """The issue title leads with the deadline, so it has to be the nearest one, compared as numbers."""
+    findings = [
+        Finding("constant", "a", "detail", breaks_in="2027.10"),
+        Finding("constant", "b", "detail", breaks_in="2027.9"),
+        Finding("runtime", "c", "detail", breaks_in="2028.1"),
+    ]
+
+    # 2027.9 beats 2027.10 numerically, though it loses as a string.
+    assert earliest_removal(findings) == "2027.9"
+
+
+def test_no_deadline_when_nothing_names_a_version() -> None:
+    """An unannounced deprecation, or a suite that already fails, leaves the title version-less."""
+    assert earliest_removal([]) is None
+    assert earliest_removal([Finding("runtime", "a", "detail")]) is None
 
 
 def test_report_says_so_when_nothing_is_deprecated() -> None:

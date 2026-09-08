@@ -307,6 +307,19 @@ def render_markdown(result: dict) -> str:
     return "\n".join(lines).strip() + "\n"
 
 
+def earliest_removal(findings: list[Finding]) -> str | None:
+    """Return the soonest Home Assistant version any of these findings breaks in.
+
+    The issue title leads with this, so it has to be the *soonest* of them: that version is what
+    decides how urgent the whole list is. None when nothing names a version -- an unannounced
+    deprecation, or a suite that has already stopped passing.
+    """
+    versions = [finding.breaks_in for finding in findings if finding.breaks_in]
+    if not versions:
+        return None
+    return min(versions, key=lambda version: tuple(int(part) for part in version.split(".") if part.isdigit()))
+
+
 def build_result(skip_tests: bool, report_path: Path) -> dict:
     """Run both passes and return the combined report."""
     runtime_findings: list[Finding] = []
@@ -315,11 +328,15 @@ def build_result(skip_tests: bool, report_path: Path) -> dict:
     if not skip_tests:
         runtime_findings, exit_code, output = run_tests(report_path)
 
+    static_findings = sorted(static_scan(), key=lambda f: f.sort_key)
+    runtime_findings = sorted(runtime_findings, key=lambda f: f.sort_key)
+
     result = {
         "ha_version": ha_version(),
         "scanned_at": datetime.now(UTC).strftime("%Y-%m-%d"),
-        "static_findings": [asdict(f) for f in sorted(static_scan(), key=lambda f: f.sort_key)],
-        "runtime_findings": [asdict(f) for f in sorted(runtime_findings, key=lambda f: f.sort_key)],
+        "static_findings": [asdict(f) for f in static_findings],
+        "runtime_findings": [asdict(f) for f in runtime_findings],
+        "earliest_removal": earliest_removal(static_findings + runtime_findings),
         "tests_ran": not skip_tests,
         "pytest_exit_code": exit_code,
         "pytest_output": output,

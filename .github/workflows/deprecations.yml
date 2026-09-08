@@ -58,6 +58,10 @@ jobs:
           fi
           found=$(python -c "import json; print(str(json.load(open('deprecations.json'))['has_findings']).lower())")
           echo "found=$found" >> "$GITHUB_OUTPUT"
+          # The soonest version anything breaks in, for the issue title. Empty when nothing names
+          # one, which happens for an unannounced deprecation or an already-failing suite.
+          deadline=$(python -c "import json; print(json.load(open('deprecations.json'))['earliest_removal'] or '')")
+          echo "deadline=$deadline" >> "$GITHUB_OUTPUT"
           cat deprecations.md >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v7
@@ -74,6 +78,7 @@ jobs:
         env:
           FOUND: ${{ steps.scan.outputs.found }}
           HA_VERSION: ${{ steps.ha.outputs.version }}
+          DEADLINE: ${{ steps.scan.outputs.deadline }}
         with:
           script: |
             const fs = require('fs');
@@ -81,17 +86,24 @@ jobs:
             // living issue rather than filing a new one every morning. The marker is how it finds
             // that issue again; a label would work too, but this survives someone relabelling.
             const MARKER = '<!-- ha-deprecation-scan -->';
-            const TITLE = 'Home Assistant deprecations affecting this integration';
             const { owner, repo } = context.repo;
             const found = process.env.FOUND === 'true';
             const report = fs.readFileSync('deprecations.md', 'utf8');
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            // Lead with the soonest version anything breaks in, so the deadline is readable from
+            // the issue list. Rewritten on every update, so fixing the most urgent finding moves
+            // the title on to the next one instead of leaving a stale date.
+            const deadline = process.env.DEADLINE;
+            const title = deadline
+              ? `Home Assistant ${deadline} deprecations affecting this integration`
+              : 'Home Assistant deprecations affecting this integration';
             const body = [
-              MARKER,
               report,
               '',
               `Found by [the daily deprecation scan](${runUrl}) against Home Assistant ${process.env.HA_VERSION}.`,
               'Each run rewrites this body, so edits to it will be overwritten.',
+              '',
+              MARKER,
             ].join('\n');
 
             const issues = await github.paginate(github.rest.issues.listForRepo, {
@@ -105,17 +117,18 @@ jobs:
             );
 
             if (found && !existing) {
-              const created = await github.rest.issues.create({ owner, repo, title: TITLE, body });
+              const created = await github.rest.issues.create({ owner, repo, title, body });
               core.notice(`Opened #${created.data.number}`);
               return;
             }
 
             if (found) {
               // The run link and version change every day; compare only the findings above them, so
-              // the issue does not collect an identical comment every morning.
-              const findings = (text) => text.split(MARKER).pop().split('Found by [')[0];
+              // the issue does not collect an identical comment every morning. Dropping the marker
+              // first keeps this working wherever in the body it sits.
+              const findings = (text) => text.split(MARKER).join('').split('Found by [')[0].trim();
               const changed = findings(existing.body ?? '') !== findings(body);
-              await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+              await github.rest.issues.update({ owner, repo, issue_number: existing.number, title, body });
               if (changed) {
                 await github.rest.issues.createComment({
                   owner,
