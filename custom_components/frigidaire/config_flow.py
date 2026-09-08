@@ -68,7 +68,9 @@ async def _login(hass: HomeAssistant, username: str, password: str, entry_id: st
 
     try:
         return await hass.async_add_executor_job(connect)
-    except frigidaire.AuthenticationError as err:
+    except frigidaire.LoginError as err:
+        # Any rejected login, not just bad credentials: an account without a password or one
+        # mid-registration is also something to fix on the Frigidaire side, not a connectivity issue.
         raise InvalidAuth from err
     except frigidaire.FrigidaireException as err:
         raise CannotConnect from err

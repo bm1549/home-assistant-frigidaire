@@ -55,6 +55,33 @@ async def test_user_flow_rejected_credentials_show_invalid_auth(hass: HomeAssist
     assert result["errors"] == {"base": "invalid_auth"}
 
 
+async def test_user_flow_rejected_login_without_a_credential_code_shows_invalid_auth(
+    hass: HomeAssistant, frigidaire_stub, tmp_path
+) -> None:
+    """A Google-SSO-only account or an account mid-registration is a login problem to fix in the
+    Frigidaire app, so the flow says so instead of 'cannot connect' (HA issues #72, #77)."""
+    hass.config.config_dir = str(tmp_path)
+    stub = frigidaire_stub([LEGACY_AC])
+    stub.error = frigidaire.LoginError("Failed to authenticate, sessionInfo was not in response")
+
+    result = await start_user_flow(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+
+    assert result["errors"] == {"base": "invalid_auth"}
+
+
+async def test_transient_login_failure_during_a_poll_does_not_start_reauth(hass: HomeAssistant, setup_entry) -> None:
+    """Only a credential rejection should prompt for a password; anything else keeps retrying."""
+    entry, stub = await setup_entry([LEGACY_AC])
+    stub.error = frigidaire.LoginError("Failed to authenticate, sessionInfo was not in response (errorCode=206001)")
+
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert hass.config_entries.flow.async_progress_by_handler(DOMAIN) == []
+    assert entry.state is ConfigEntryState.LOADED
+
+
 async def test_user_flow_api_failure_shows_cannot_connect(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
     hass.config.config_dir = str(tmp_path)
     stub = frigidaire_stub([LEGACY_AC])
