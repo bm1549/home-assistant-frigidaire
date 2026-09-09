@@ -1,2 +1,2 @@
-pytest-homeassistant-custom-component==0.13.357
+pytest-homeassistant-custom-component==0.13.364
 frigidaire==0.18.54
