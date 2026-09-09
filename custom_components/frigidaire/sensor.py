@@ -8,9 +8,9 @@ from typing import Any
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.const import (
-    CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
     PERCENTAGE,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    UnitOfDensity,
     UnitOfTemperature,
     UnitOfTime,
 )
@@ -79,7 +79,7 @@ SENSOR_DESCRIPTIONS = (
         name="PM2.5",
         value_fn=lambda appliance: appliance.pm25,
         device_class=SensorDeviceClass.PM25,
-        native_unit=CONCENTRATION_MICROGRAMS_PER_CUBIC_METER,
+        native_unit=UnitOfDensity.MICROGRAMS_PER_CUBIC_METER,
     ),
     SensorDescription(
         key="wifi_signal",
