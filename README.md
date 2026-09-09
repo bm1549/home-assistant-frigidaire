@@ -134,3 +134,26 @@ The 0.1.27 release introduces device grouping, per-device switch configuration, 
 - **No devices after a successful login?** Open the Frigidaire app and confirm your appliances are online there. If the app can't see them, HA won't either.
 
 Found a bug or have an idea? Open an [issue](https://github.com/bm1549/home-assistant-frigidaire/issues). PRs are welcome too.
+
+## Development
+
+Run the tests against the Home Assistant version pinned in `requirements_test.txt`:
+
+```bash
+pip install -r requirements_test.txt
+pytest
+```
+
+Home Assistant announces removals a year or more ahead, but only tells the *user* — a warning in
+their log, once the integration touches the deprecated thing. To find those before someone files an
+issue about them, `scripts/check_deprecations.py` checks every `homeassistant` import and enum
+member against the installed core, and re-runs the suite while recording the deprecation warnings
+core logs:
+
+```bash
+python scripts/check_deprecations.py            # exits 1 if it finds anything
+python scripts/check_deprecations.py --skip-tests  # import scan only, no test run
+```
+
+The `Home Assistant deprecations` workflow runs it daily against the newest Home Assistant release
+and keeps a single issue up to date with what it finds, closing it once nothing is left.
