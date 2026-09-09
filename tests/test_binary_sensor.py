@@ -1,8 +1,8 @@
 """Opt-in binary sensors."""
 
+from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC, with_reported
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from payloads import DEHUMIDIFIER, LEGACY_AC, with_reported
 
 BUCKET_ENABLED = {"DH-1": {"bucket_status": True}}
 
@@ -54,3 +54,29 @@ async def test_bucket_sensor_not_created_without_option_or_for_air_conditioners(
 
     assert bucket_sensor_id(hass) is None
     assert er.async_get(hass).async_get_entity_id("binary_sensor", "frigidaire", "AC-LEGACY-1_bucket_status") is None
+
+
+def binary_sensor_id(hass: HomeAssistant, unique_id: str) -> str | None:
+    return er.async_get(hass).async_get_entity_id("binary_sensor", "frigidaire", unique_id)
+
+
+async def test_reported_compressor_pump_and_hepa_get_sensors(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry(
+        [with_reported(DEHUMIDIFIER, compressorState="on", condensatePump="off", hepaFilterInsertedState="on")]
+    )
+
+    assert hass.states.get(binary_sensor_id(hass, "DH-1_compressor_state")).state == "on"
+    assert hass.states.get(binary_sensor_id(hass, "DH-1_condensate_pump")).state == "off"
+    assert hass.states.get(binary_sensor_id(hass, "DH-1_hepa_filter")).state == "on"
+
+
+async def test_models_without_that_telemetry_get_no_such_sensors(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([DEHUMIDIFIER, LEGACY_AC])
+
+    for unique_id in (
+        "DH-1_compressor_state",
+        "DH-1_condensate_pump",
+        "DH-1_hepa_filter",
+        "AC-LEGACY-1_compressor_state",
+    ):
+        assert binary_sensor_id(hass, unique_id) is None

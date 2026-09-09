@@ -1,7 +1,8 @@
 {
     "config": {
         "abort": {
-            "already_configured": "Device is already configured"
+            "already_configured": "Device is already configured",
+            "reauth_successful": "Re-authentication was successful"
         },
         "error": {
             "cannot_connect": "Failed to connect",
@@ -37,6 +38,13 @@
                     "compressor": "Opt-in temperature-based estimate, not device telemetry. Adds a Compressor Estimate diagnostic sensor and refines hvac_action while enabled on appliances that do not report modeState.",
                     "cool_hysteresis": "Temperature deadband around the setpoint used by the estimate. Zero disables the deadband.",
                     "compressor_off_delay": "How long the room must remain below the lower deadband boundary before the estimate changes to idle."
+                }
+            },
+            "reauth_confirm": {
+                "title": "Re-authenticate Frigidaire",
+                "description": "The password for {username} was rejected. Enter the current password.",
+                "data": {
+                    "password": "Password"
                 }
             }
         }

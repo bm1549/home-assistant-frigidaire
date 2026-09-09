@@ -1,123 +1,82 @@
-"""Parsing helpers for Frigidaire appliance diagnostics."""
+"""Diagnostics downloads: the raw cloud records, redacted, plus how they were parsed.
+
+Every model-specific fix so far started from a payload a user pasted into an issue.
+This makes that a file attachment with the personal fields already removed.
+"""
 
 from __future__ import annotations
 
-import math
-from collections.abc import Mapping
 from typing import Any
 
-AIR_FILTER_LIFETIME_KEY = "airFilterLifeTime"
-GOOD_FILTER_STATE = "GOOD"
+from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceEntry
+
+from frigidaire import Appliance
+
+from .const import DOMAIN
+from .coordinator import FrigidaireConfigEntry
+
+TO_REDACT = {
+    "username",
+    "password",
+    "applianceId",
+    "deviceId",
+    "TimeZoneStandardName",
+    "TimeZoneDaylightRule",
+}
+
+# Accessors worth seeing next to the raw record when triaging a report.
+PARSED_FIELDS = (
+    "destination",
+    "connection_state",
+    "state",
+    "mode",
+    "mode_state",
+    "fan_speed",
+    "fan_speed_state",
+    "temperature_unit",
+    "ambient_temperature",
+    "target_temperature",
+    "humidity",
+    "target_humidity",
+    "filter_state",
+    "filter_needs_attention",
+    "alerts",
+    "bucket_full",
+    "compressor_running",
+    "sleep_mode",
+    "vertical_swing",
+    "ui_locked",
+    "display_light",
+    "clean_air_mode",
+    "start_time",
+    "stop_time",
+    "is_connected",
+)
 
 
-def normalize_alerts(value: Any) -> list[str] | None:
-    """Return alert codes from either supported API response format."""
-    if value is None:
-        return None
-
-    raw_alerts = value if isinstance(value, list | tuple | set | frozenset) else [value]
-    alerts: list[str] = []
-    for alert in raw_alerts:
-        code = alert.get("code") if isinstance(alert, Mapping) else alert
-        if code is not None:
-            alerts.append(str(code).upper())
-    return alerts
+def _describe(appliance: Appliance) -> dict[str, Any]:
+    parsed = {name: getattr(appliance, name) for name in PARSED_FIELDS}
+    parsed["nickname"] = appliance.nickname
+    parsed["model"] = appliance.appliance_type
+    return {"parsed": parsed, "raw": async_redact_data(appliance.raw, TO_REDACT)}
 
 
-def normalize_filter_state(value: Any) -> str | None:
-    """Return a normalized filter-state string."""
-    if value is None:
-        return None
-    return str(value).upper()
+async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: FrigidaireConfigEntry) -> dict[str, Any]:
+    coordinator = entry.runtime_data
+    return {
+        "entry": {"data": async_redact_data(dict(entry.data), TO_REDACT), "options": dict(entry.options)},
+        "last_update_success": coordinator.last_update_success,
+        "appliances": [_describe(appliance) for appliance in (coordinator.data or {}).values()],
+    }
 
 
-def filter_needs_attention(value: Any) -> bool | None:
-    """Return whether a reported filter state requires attention."""
-    state = normalize_filter_state(value)
-    return None if state is None else state != GOOD_FILTER_STATE
-
-
-def bucket_is_full(
-    alerts: list[str] | None,
-    water_bucket_level: Any,
-    water_tank_full: Any,
-) -> bool | None:
-    """Return whether the water bucket is full, or None when unreported.
-
-    Different dehumidifier models report the bucket through different signals,
-    so all three are checked: a BUCKET_FULL alert code, waterBucketLevel == 1,
-    and waterTankFull. ``alerts`` must already be normalized (see
-    ``normalize_alerts``). Returns None when the appliance reports none of the
-    signals, letting callers distinguish "empty" from "not supported by this
-    model".
-    """
-    if alerts is None and water_bucket_level is None and water_tank_full is None:
-        return None
-    if alerts is not None and "BUCKET_FULL" in alerts:
-        return True
-    if water_bucket_level == 1:
-        return True
-    tank = water_tank_full.upper() if isinstance(water_tank_full, str) else water_tank_full
-    return tank in ("YES", True)
-
-
-def filter_runtime_seconds(value: Any) -> float | None:
-    """Return valid cumulative filter-runtime seconds."""
-    try:
-        seconds = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(seconds) or seconds < 0:
-        return None
-    return seconds
-
-
-def _finite_float(value: Any) -> float | None:
-    """Coerce to a finite float, or None if the value is missing or unparseable."""
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if math.isfinite(number) else None
-
-
-def humidity_percent(value: Any) -> float | None:
-    """Return a reported relative-humidity reading, or None if out of range."""
-    humidity = _finite_float(value)
-    if humidity is None or not 0 <= humidity <= 100:
-        return None
-    return humidity
-
-
-def particulate_matter(value: Any) -> float | None:
-    """Return a reported particulate concentration in ug/m3, or None if implausible."""
-    concentration = _finite_float(value)
-    if concentration is None or concentration < 0:
-        return None
-    return concentration
-
-
-def network_rssi(value: Any) -> float | None:
-    """Return the RSSI from a reported networkInterface mapping.
-
-    Appliances report signal strength nested under networkInterface rather than as a
-    top-level key, and omit the mapping entirely when they have never reported Wi-Fi
-    telemetry. A non-negative RSSI is rejected: real dBm readings here are always negative,
-    so 0 or above means the field is a placeholder rather than a measurement.
-    """
-    if not isinstance(value, Mapping):
-        return None
-    rssi = _finite_float(value.get("rssi"))
-    if rssi is None or rssi >= 0:
-        return None
-    return rssi
-
-
-def link_quality(value: Any) -> str | None:
-    """Return the normalized link-quality indicator from a networkInterface mapping."""
-    if not isinstance(value, Mapping):
-        return None
-    indicator = value.get("linkQualityIndicator")
-    if indicator is None:
-        return None
-    return str(indicator).upper()
+async def async_get_device_diagnostics(
+    hass: HomeAssistant, entry: FrigidaireConfigEntry, device: DeviceEntry
+) -> dict[str, Any]:
+    appliance_ids = {identifier for domain, identifier in device.identifiers if domain == DOMAIN}
+    appliances = [a for appliance_id, a in (entry.runtime_data.data or {}).items() if appliance_id in appliance_ids]
+    if not appliances:
+        return {"error": "appliance not in the last account fetch"}
+    return _describe(appliances[0])

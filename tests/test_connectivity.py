@@ -4,10 +4,10 @@ import copy
 from datetime import timedelta
 
 import frigidaire
+from frigidaire.testing import LEGACY_AC
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from payloads import LEGACY_AC
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 
@@ -43,7 +43,7 @@ async def test_record_without_connection_state_creates_no_sensor(hass: HomeAssis
 
 async def test_failed_poll_makes_connectivity_unavailable(hass: HomeAssistant, setup_entry) -> None:
     _entry, stub = await setup_entry([LEGACY_AC])
-    stub.details_error = frigidaire.FrigidaireException("Request failed", status_code=503)
+    stub.error = frigidaire.FrigidaireException("Request failed", status_code=503)
 
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
     await hass.async_block_till_done(wait_background_tasks=True)

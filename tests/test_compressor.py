@@ -1,6 +1,6 @@
 """Tests for temperature-based compressor estimation."""
 
-from compressor import CompressorEstimator, estimate_compressor_running
+from custom_components.frigidaire.compressor import CompressorEstimator, estimate_compressor_running
 
 
 def estimate(

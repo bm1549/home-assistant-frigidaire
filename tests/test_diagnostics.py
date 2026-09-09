@@ -1,153 +1,41 @@
-"""Tests for Frigidaire diagnostic parsing."""
+"""Diagnostics downloads carry the raw records with personal fields redacted."""
 
-import math
-
-import pytest
-from diagnostics import (
-    bucket_is_full,
-    filter_needs_attention,
-    filter_runtime_seconds,
-    humidity_percent,
-    link_quality,
-    network_rssi,
-    normalize_alerts,
-    normalize_filter_state,
-    particulate_matter,
+from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
+from pytest_homeassistant_custom_component.components.diagnostics import (
+    get_diagnostics_for_config_entry,
+    get_diagnostics_for_device,
 )
+from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
+
+DOMAIN = "frigidaire"
 
 
-@pytest.mark.parametrize(
-    ("state", "expected"),
-    [
-        (None, None),
-        ("good", False),
-        ("CLEAN", True),
-        ("CHANGE", True),
-        ("BUY", True),
-    ],
-)
-def test_filter_needs_attention(state, expected):
-    assert filter_needs_attention(state) is expected
+async def test_config_entry_diagnostics(hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry) -> None:
+    entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
+
+    diagnostics = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+
+    assert diagnostics["entry"]["data"] == {"username": "**REDACTED**", "password": "**REDACTED**"}
+    records = {a["raw"]["applianceData"]["applianceName"]: a for a in diagnostics["appliances"]}
+    assert records["Bedroom AC"]["raw"]["applianceId"] == "**REDACTED**"
+    assert records["Bedroom AC"]["raw"]["properties"]["reported"]["mode"] == "COOL"
+    assert records["Bedroom AC"]["raw"]["connectionState"] == "Connected"
+    assert records["Bedroom AC"]["parsed"]["destination"] == "AC"
+    assert records["Bedroom AC"]["parsed"]["mode"] == "COOL"
+    assert records["Basement Dehumidifier"]["parsed"]["destination"] == "DH"
 
 
-def test_normalize_filter_state():
-    assert normalize_filter_state("clean") == "CLEAN"
+async def test_device_diagnostics_returns_only_that_appliance(
+    hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry
+) -> None:
+    entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
+    device = dr.async_get(hass).async_get_device_by_identifier((DOMAIN, "DH-1"), entry.entry_id)
+    assert device is not None
 
+    diagnostics = await get_diagnostics_for_device(hass, hass_client, entry, device)
 
-@pytest.mark.parametrize(
-    ("alerts", "expected"),
-    [
-        (None, None),
-        ([], []),
-        ("communication_fault", ["COMMUNICATION_FAULT"]),
-        (["BUS_HIGH_VOLTAGE", {"code": "communication_fault"}], ["BUS_HIGH_VOLTAGE", "COMMUNICATION_FAULT"]),
-        ([{"message": "missing code"}], []),
-    ],
-)
-def test_normalize_alerts(alerts, expected):
-    assert normalize_alerts(alerts) == expected
-
-
-@pytest.mark.parametrize(
-    ("seconds", "expected"),
-    [
-        (482400, 482400),
-        ("3600", 3600),
-        (0, 0),
-        (None, None),
-        ("invalid", None),
-        (-1, None),
-        (math.inf, None),
-    ],
-)
-def test_filter_runtime_seconds(seconds, expected):
-    assert filter_runtime_seconds(seconds) == expected
-
-
-@pytest.mark.parametrize(
-    ("alerts", "water_bucket_level", "water_tank_full", "expected"),
-    [
-        (None, None, None, None),
-        ([], None, None, False),
-        (["BUCKET_FULL"], None, None, True),
-        (["FILTER"], 0, None, False),
-        (None, 1, None, True),
-        (None, 0, "NO", False),
-        (None, None, "yes", True),
-        (None, None, True, True),
-        (None, None, False, False),
-    ],
-)
-def test_bucket_is_full(alerts, water_bucket_level, water_tank_full, expected):
-    assert bucket_is_full(alerts, water_bucket_level, water_tank_full) is expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (86, 86),
-        ("48.5", 48.5),
-        (0, 0),
-        (100, 100),
-        (None, None),
-        ("invalid", None),
-        (-1, None),
-        (101, None),
-        (math.inf, None),
-        (math.nan, None),
-    ],
-)
-def test_humidity_percent(value, expected):
-    assert humidity_percent(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        (4, 4),
-        ("12", 12),
-        (0, 0),
-        (None, None),
-        ("invalid", None),
-        (-1, None),
-        (math.inf, None),
-        (math.nan, None),
-    ],
-)
-def test_particulate_matter(value, expected):
-    assert particulate_matter(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ({"linkQualityIndicator": "EXCELLENT", "rssi": -41}, -41),
-        ({"rssi": "-67"}, -67),
-        # Positive dBm is not a real reading, so treat it as a placeholder.
-        ({"rssi": 41}, None),
-        ({"rssi": 0}, None),
-        ({"linkQualityIndicator": "EXCELLENT"}, None),
-        ({}, None),
-        (None, None),
-        # Appliances that report no Wi-Fi telemetry can send a scalar or a list here.
-        ("EXCELLENT", None),
-        ([], None),
-    ],
-)
-def test_network_rssi(value, expected):
-    assert network_rssi(value) == expected
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        ({"linkQualityIndicator": "EXCELLENT", "rssi": -41}, "EXCELLENT"),
-        ({"linkQualityIndicator": "poor"}, "POOR"),
-        ({"rssi": -41}, None),
-        ({}, None),
-        (None, None),
-        ("EXCELLENT", None),
-    ],
-)
-def test_link_quality(value, expected):
-    assert link_quality(value) == expected
+    assert diagnostics["raw"]["applianceData"]["applianceName"] == "Basement Dehumidifier"
+    assert diagnostics["raw"]["applianceId"] == "**REDACTED**"
+    assert diagnostics["parsed"]["target_humidity"] == 45

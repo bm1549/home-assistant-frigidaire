@@ -1,8 +1,8 @@
 """Switch entity behaviour for opt-in dehumidifier/AC switches."""
 
+from frigidaire.testing import DEHUMIDIFIER, with_reported
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from payloads import DEHUMIDIFIER, with_reported
 
 ALL_SWITCHES_ENABLED = {"DH-1": {"display_light": True, "clean_air_mode": True, "ui_lock": True}}
 
@@ -82,3 +82,9 @@ async def test_child_lock_boolean_switch_still_works(hass: HomeAssistant, setup_
     await turn_off(hass, child_lock_id(hass))
 
     assert stub.commands == [("uiLockMode", False)]
+
+
+async def test_child_lock_keeps_its_switch_device_class(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([DEHUMIDIFIER], options=ALL_SWITCHES_ENABLED)
+
+    assert hass.states.get(child_lock_id(hass)).attributes["device_class"] == "switch"
