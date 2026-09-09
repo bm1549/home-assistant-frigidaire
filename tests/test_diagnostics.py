@@ -31,7 +31,7 @@ async def test_device_diagnostics_returns_only_that_appliance(
     hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry
 ) -> None:
     entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "DH-1")})
+    device = dr.async_get(hass).async_get_device_by_identifier((DOMAIN, "DH-1"), entry.entry_id)
     assert device is not None
 
     diagnostics = await get_diagnostics_for_device(hass, hass_client, entry, device)
