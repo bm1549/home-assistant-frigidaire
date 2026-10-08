@@ -1,148 +1,91 @@
-"""Switch entities for frigidaire integration."""
+"""Switch entities for opt-in on/off settings."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-import frigidaire
-from frigidaire import Component, Detail, Setting
+from frigidaire import Appliance, Frigidaire
 
-from .const import DOMAIN
-from .coordinator import FrigidaireApplianceCoordinator
-from .helpers import suggest_area
+from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
+from .entity import FrigidaireEntity, async_add_appliance_entities
 
 
-def _normalize(value):
-    if isinstance(value, str):
-        return value.upper()
-    return value
-
-
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class SwitchDescription:
-    key: str
+    key: str  # must match a SWITCH_OPTIONS key in const.py
     name: str
-    detail: Detail
-    setting: Setting
-    on_value: Any
-    off_value: Any
+    icon: str
+    is_on: Callable[[Appliance], bool | None]
+    set: Callable[[Frigidaire, Appliance, bool], None]
     device_class: SwitchDeviceClass | None = None
-    icon: str | None = None
-
-    def make_action(self, turn_on: bool) -> list[Component]:
-        return [Component(self.setting, self.on_value if turn_on else self.off_value)]
 
 
-SWITCH_DESCRIPTIONS: dict[str, SwitchDescription] = {
-    d.key: d
-    for d in [
-        SwitchDescription(
-            key="clean_air_mode",
-            name="Ionizer",
-            detail=Detail.CLEAN_AIR_MODE,
-            setting=Setting.CLEAN_AIR_MODE,
-            on_value="ON",
-            off_value="OFF",
-            icon="mdi:air-purifier",
-        ),
-        SwitchDescription(
-            key="display_light",
-            name="Display Light",
-            detail=Detail.DISPLAY_LIGHT,
-            setting=Setting.DISPLAY_LIGHT,
-            on_value=frigidaire.DisplayLight.ON,
-            off_value=frigidaire.DisplayLight.OFF,
-            icon="mdi:lightbulb-outline",
-        ),
-        SwitchDescription(
-            key="ui_lock",
-            name="Child Lock",
-            detail=Detail.UI_LOCK_MODE,
-            setting=Setting.UI_LOCK_MODE,
-            on_value=True,
-            off_value=False,
-            device_class=SwitchDeviceClass.SWITCH,
-            icon="mdi:lock",
-        ),
-    ]
-}
+SWITCH_DESCRIPTIONS = (
+    SwitchDescription(
+        key="clean_air_mode",
+        name="Ionizer",
+        icon="mdi:air-purifier",
+        is_on=lambda appliance: appliance.clean_air_mode,
+        set=lambda client, appliance, on: client.set_clean_air_mode(appliance, on),
+    ),
+    SwitchDescription(
+        key="display_light",
+        name="Display Light",
+        icon="mdi:lightbulb-outline",
+        is_on=lambda appliance: appliance.display_light,
+        set=lambda client, appliance, on: client.set_display_light(appliance, on),
+    ),
+    SwitchDescription(
+        key="ui_lock",
+        name="Child Lock",
+        icon="mdi:lock",
+        is_on=lambda appliance: appliance.ui_locked,
+        set=lambda client, appliance, on: client.set_ui_lock(appliance, on),
+        device_class=SwitchDeviceClass.SWITCH,
+    ),
+)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
-    """Set up frigidaire switch entities from a config entry."""
-    coordinators: dict[str, FrigidaireApplianceCoordinator] = hass.data[DOMAIN][entry.entry_id]["coordinators"]
-    appliances: list[frigidaire.Appliance] = hass.data[DOMAIN][entry.entry_id]["appliances"]
-    # options is keyed by appliance_id -> {switch_key: bool}
-    options: dict[str, dict[str, bool]] = entry.options
+async def async_setup_entry(
+    hass: HomeAssistant, entry: FrigidaireConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
+    """Create the switches enabled per device in the entry options."""
+    async_add_appliance_entities(
+        entry.runtime_data,
+        async_add_entities,
+        lambda appliance: [
+            FrigidaireSwitch(entry.runtime_data, appliance, description)
+            for description in SWITCH_DESCRIPTIONS
+            if entry.options.get(appliance.appliance_id, {}).get(description.key, False)
+        ],
+    )
 
-    if not options:
-        return
 
-    entities = [
-        FrigidaireSwitch(
-            coordinators[appliance.appliance_id], SWITCH_DESCRIPTIONS[key], suggest_area(hass, appliance.nickname)
+class FrigidaireSwitch(FrigidaireEntity, SwitchEntity):
+    """A switch for a single on/off setting."""
+
+    def __init__(self, coordinator: FrigidaireCoordinator, appliance: Appliance, description: SwitchDescription):
+        super().__init__(
+            coordinator, appliance, unique_id=f"{appliance.appliance_id}_{description.key}", name=description.name
         )
-        for appliance in appliances
-        for key, enabled in options.get(appliance.appliance_id, {}).items()
-        if enabled and key in SWITCH_DESCRIPTIONS
-    ]
-
-    async_add_entities(entities)
-
-
-class FrigidaireSwitch(CoordinatorEntity[FrigidaireApplianceCoordinator], SwitchEntity):
-    """A switch for a single Frigidaire boolean setting."""
-
-    def __init__(
-        self,
-        coordinator: FrigidaireApplianceCoordinator,
-        desc: SwitchDescription,
-        suggested_area: str | None = None,
-    ) -> None:
-        super().__init__(coordinator)
-        self._client = coordinator.client
-        self._appliance = coordinator.appliance
-        self._desc = desc
-        self._attr_unique_id = f"{self._appliance.appliance_id}_{desc.key}"
-        self._attr_name = desc.name
-        self._attr_device_class = desc.device_class
-        self._attr_icon = desc.icon
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._appliance.appliance_id)},
-            name=self._appliance.nickname,
-            manufacturer="Frigidaire",
-            suggested_area=suggested_area,
-        )
-
-    @property
-    def _details(self) -> dict:
-        return self.coordinator.data or {}
+        self._description = description
+        self._attr_icon = description.icon
+        self._attr_device_class = description.device_class
 
     @property
     def is_on(self) -> bool | None:
-        raw = self._details.get(self._desc.detail)
-        if raw is None:
-            return None
-        on_val = self._desc.on_value
-        if isinstance(on_val, bool):
-            # API may return a bool or a string "true"/"false"
-            if isinstance(raw, bool):
-                return raw == on_val
-            return str(raw).upper() == "TRUE" if on_val else str(raw).upper() == "FALSE"
-        return _normalize(raw) == _normalize(on_val)
+        return self._description.is_on(self.appliance)
 
     def turn_on(self, **kwargs: Any) -> None:
-        self._client.execute_action(self._appliance, self._desc.make_action(True))
-        self.schedule_update_ha_state(force_refresh=True)
+        self._description.set(self.client, self.appliance, True)
+        self.refresh()
 
     def turn_off(self, **kwargs: Any) -> None:
-        self._client.execute_action(self._appliance, self._desc.make_action(False))
-        self.schedule_update_ha_state(force_refresh=True)
+        self._description.set(self.client, self.appliance, False)
+        self.refresh()

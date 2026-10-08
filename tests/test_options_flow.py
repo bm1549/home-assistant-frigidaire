@@ -1,9 +1,9 @@
 """Per-device options flow: enabling an optional entity creates it after reload."""
 
+from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import entity_registry as er
-from payloads import DEHUMIDIFIER, LEGACY_AC
 
 
 async def test_enabling_check_filter_creates_binary_sensor(hass: HomeAssistant, setup_entry) -> None:

@@ -4,10 +4,10 @@ from datetime import timedelta
 
 import frigidaire
 import pytest
+from frigidaire.testing import LEGACY_AC, TELICA_AC, with_reported
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from payloads import LEGACY_AC, TELICA_AC, with_reported
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 OFF_AC = with_reported(LEGACY_AC, applianceState="OFF", mode="OFF")
@@ -82,13 +82,13 @@ async def test_failed_poll_marks_climate_unavailable_and_logs(
     hass: HomeAssistant, setup_entry, caplog: pytest.LogCaptureFixture
 ) -> None:
     _entry, stub = await setup_entry([LEGACY_AC])
-    stub.details_error = frigidaire.FrigidaireException("Request failed", status_code=429, error_code="cas_3403")
+    stub.error = frigidaire.SessionCapError("Request failed", status_code=429, error_code="cas_3403")
 
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert hass.states.get(climate_id(hass)).state == "unavailable"
-    assert "Error communicating with Frigidaire (status=429, error=cas_3403)" in caplog.text
+    assert "Rate limited by Frigidaire (status=429, error=cas_3403)" in caplog.text
 
 
 async def test_hvac_action_prefers_reported_mode_state(hass: HomeAssistant, setup_entry) -> None:
@@ -126,3 +126,35 @@ async def test_hvac_action_falls_back_to_drying_for_dry_mode(hass: HomeAssistant
     await setup_entry([with_reported(LEGACY_AC, mode="DRY")])
 
     assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "drying"
+
+
+async def test_reported_fan_speed_attributes(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([LEGACY_AC])  # fanSpeedState LOW
+
+    attributes = hass.states.get(climate_id(hass)).attributes
+    assert attributes["reported_fan_speed"] == "low"
+    assert attributes["current_fan_speed"] == "low"
+
+
+async def test_unknown_reported_fan_speed_is_still_exposed(hass: HomeAssistant, setup_entry) -> None:
+    """A speed this integration does not know is passed through lowercased, as it always was."""
+    await setup_entry([with_reported(LEGACY_AC, fanSpeedState="TURBO")])
+
+    assert hass.states.get(climate_id(hass)).attributes["reported_fan_speed"] == "turbo"
+
+
+async def test_reported_compressor_state_beats_everything_else(hass: HomeAssistant, setup_entry) -> None:
+    """Real telemetry, where a model reports it, decides hvac_action."""
+    await setup_entry([with_reported(LEGACY_AC, mode="COOL", compressorState="off")])
+    assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "idle"
+
+
+async def test_compressor_on_in_dry_mode_is_drying(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(LEGACY_AC, mode="DRY", compressorState="on")])
+    assert hass.states.get(climate_id(hass)).attributes["hvac_action"] == "drying"
+
+
+async def test_compressor_off_with_fan_running_is_fan(hass: HomeAssistant, setup_entry) -> None:
+    await setup_entry([with_reported(TELICA_AC, mode="eco", modeState="fanOnly", compressorState="off")])
+    entity_id = er.async_get(hass).async_get_entity_id("climate", "frigidaire", "AC-TELICA-1")
+    assert hass.states.get(entity_id).attributes["hvac_action"] == "fan"

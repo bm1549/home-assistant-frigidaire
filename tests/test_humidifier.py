@@ -1,9 +1,9 @@
 """Humidifier entity behaviour for dehumidifiers."""
 
 import pytest
+from frigidaire.testing import DEHUMIDIFIER, with_reported
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from payloads import DEHUMIDIFIER, with_reported
 
 
 def humidifier_id(hass: HomeAssistant) -> str:
@@ -39,3 +39,22 @@ async def test_bin_full_is_detected_from_every_reported_signal(hass: HomeAssista
     await setup_entry([with_reported(DEHUMIDIFIER, **changes)])
 
     assert hass.states.get(humidifier_id(hass)).attributes["bin_full"] is True
+
+
+@pytest.mark.parametrize(
+    "changes,expected",
+    [
+        ({"compressorState": "on"}, "drying"),
+        ({"compressorState": "off"}, "idle"),
+        ({"compressorState": "on", "applianceState": "OFF"}, "off"),
+    ],
+)
+async def test_action_follows_reported_compressor_state(hass: HomeAssistant, setup_entry, changes, expected) -> None:
+    await setup_entry([with_reported(DEHUMIDIFIER, **changes)])
+    assert hass.states.get(humidifier_id(hass)).attributes["action"] == expected
+
+
+async def test_no_action_without_compressor_telemetry(hass: HomeAssistant, setup_entry) -> None:
+    """Models that do not report the compressor must not claim to know what it is doing."""
+    await setup_entry([DEHUMIDIFIER])
+    assert "action" not in hass.states.get(humidifier_id(hass)).attributes
