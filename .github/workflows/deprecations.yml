@@ -123,10 +123,16 @@ jobs:
             }
 
             if (found) {
-              // The run link and version change every day; compare only the findings above them, so
+              // The run link, version and scan date change every day; compare only the findings, so
               // the issue does not collect an identical comment every morning. Dropping the marker
               // first keeps this working wherever in the body it sits.
-              const findings = (text) => text.split(MARKER).join('').split('Found by [')[0].trim();
+              const findings = (text) =>
+                text
+                  .split(MARKER)
+                  .join('')
+                  .split('Found by [')[0]
+                  .replace(/^Scanned against .*$/m, '')
+                  .trim();
               const changed = findings(existing.body ?? '') !== findings(body);
               await github.rest.issues.update({ owner, repo, issue_number: existing.number, title, body });
               if (changed) {
