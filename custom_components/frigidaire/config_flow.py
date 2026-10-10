@@ -165,8 +165,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
 
-class OptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options for the frigidaire integration."""
+class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
+    """Handle options for the frigidaire integration; saving reloads the entry so entity selection takes effect."""
 
     def __init__(self) -> None:
         self._pending_appliances: list[frigidaire.Appliance] = []

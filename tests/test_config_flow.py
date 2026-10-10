@@ -3,6 +3,7 @@
 from datetime import timedelta
 
 import frigidaire
+import pytest
 from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState
@@ -127,7 +128,9 @@ async def test_rejected_credentials_during_a_poll_start_reauth(hass: HomeAssista
     assert flows[0]["step_id"] == "reauth_confirm"
 
 
-async def test_reauth_with_a_working_password_updates_and_reloads_the_entry(hass: HomeAssistant, setup_entry) -> None:
+async def test_reauth_with_a_working_password_updates_and_reloads_the_entry(
+    hass: HomeAssistant, setup_entry, caplog: pytest.LogCaptureFixture
+) -> None:
     entry, stub = await setup_entry([LEGACY_AC])
     stub.error = frigidaire.AuthenticationError("Failed to authenticate")
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
@@ -143,6 +146,8 @@ async def test_reauth_with_a_working_password_updates_and_reloads_the_entry(hass
     assert entry.data["password"] == "new-secret"
     assert entry.state is ConfigEntryState.LOADED
     assert stub.password == "new-secret"
+    # Home Assistant 2026.12 stops reloading entries that also carry an update listener.
+    assert "update listener" not in caplog.text
 
 
 async def test_reauth_with_a_wrong_password_shows_invalid_auth(hass: HomeAssistant, setup_entry) -> None:
