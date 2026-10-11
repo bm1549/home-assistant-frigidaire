@@ -16,7 +16,9 @@ from .session import initial_session, session_store
 
 async def async_setup_entry(hass: HomeAssistant, entry: FrigidaireConfigEntry) -> bool:
     """Set up frigidaire from a config entry."""
-    session_key, regional_base_url = initial_session(hass.config.path(), entry.entry_id)
+    session_key, regional_base_url = await hass.async_add_executor_job(
+        initial_session, hass.config.path(), entry.entry_id
+    )
     connect = partial(
         frigidaire.Frigidaire,
         entry.data["username"],
