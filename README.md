@@ -28,6 +28,18 @@ A Home Assistant integration for Frigidaire WiFi-connected appliances, using the
 - `hvac_action` reflects the mode the appliance reports it is *actually* running, so an
 	Eco/Auto unit shows `cooling` vs `fan` as it cycles rather than the requested mode
 
+### Optional Heat Mode
+
+For an air conditioner you have confirmed can heat, enable **Enable heat mode (confirmed heat-capable device only)**
+during setup or under **Settings → Devices & Services → Frigidaire → Configure**. This per-appliance option is off by
+default; neither a model name nor this checkbox detects heating capability. Disabling it removes Heat from that device's
+available modes. Other devices and the existing temperature limits (60–90 °F / 16–32 °C) are unchanged.
+
+Heat selection and activity are separate: `hvac_mode` stays `heat` while cloud-reported activity can show `heating`, `fan`,
+or `idle`. Missing or unrecognized activity without compressor telemetry is unknown, not a cooling-based temperature
+estimate. These are cloud reports, not independent confirmation that the appliance is producing heat. Without the opt-in,
+unsupported heat reports do not fall back to `cooling`.
+
 ### Dehumidifier
 
 - Modes: Normal (Dry), Boost (Continuous), Auto, Sleep
