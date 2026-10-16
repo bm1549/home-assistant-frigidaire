@@ -18,6 +18,7 @@ from .const import (
     CONF_COMPRESSOR_ESTIMATE,
     CONF_COMPRESSOR_OFF_DELAY,
     CONF_COOL_HYSTERESIS,
+    CONF_HEAT_SUPPORTED,
     DEFAULT_COMPRESSOR_OFF_DELAY,
     DEFAULT_COOL_HYSTERESIS,
     DOMAIN,
@@ -39,6 +40,7 @@ def _device_schema(current: dict, appliance: frigidaire.Appliance) -> vol.Schema
     fields: dict = {vol.Optional(key, default=current.get(key, False)): bool for key in ALL_OPTIONS}
 
     if appliance.destination is frigidaire.Destination.AIR_CONDITIONER:
+        fields[vol.Optional(CONF_HEAT_SUPPORTED, default=current.get(CONF_HEAT_SUPPORTED, False))] = bool
         fields[vol.Optional(CONF_COMPRESSOR_ESTIMATE, default=current.get(CONF_COMPRESSOR_ESTIMATE, False))] = bool
         fields[
             vol.Optional(
