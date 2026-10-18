@@ -1,4 +1,4 @@
-"""Explicit per-appliance heat opt-in with released frigidaire 1.0.0."""
+"""Explicit per-appliance heat opt-in."""
 
 import json
 from pathlib import Path
@@ -85,12 +85,12 @@ async def test_heat_option_is_available_during_initial_setup(hass: HomeAssistant
         (None, "heat", "idle"),
     ],
 )
-async def test_raw_heat_parsing_and_availability(
+async def test_heat_parsing_and_availability(
     hass: HomeAssistant, setup_entry, raw_mode, power, expected_mode, expected_action
 ) -> None:
     record = with_reported(TELICA_AC, mode=raw_mode, modeState="fanOnly", applianceState=power)
     entry, _stub = await setup_entry([record], options={"AC-TELICA-1": {"heat_supported": True}})
-    assert entry.runtime_data.data["AC-TELICA-1"].mode is None  # Pinned library cannot parse heat.
+    assert entry.runtime_data.data["AC-TELICA-1"].mode is frigidaire.Mode.HEAT
     state = hass.states.get(heat_climate_id(hass))
     assert state.state == expected_mode
     assert state.attributes["hvac_action"] == expected_action
@@ -105,7 +105,7 @@ async def test_raw_heat_parsing_and_availability(
         ("running", "off", True),
     ],
 )
-async def test_set_heat_sends_power_then_raw_heat_and_restores_off_setpoint(
+async def test_set_heat_sends_power_then_heat_and_restores_off_setpoint(
     hass: HomeAssistant, setup_entry, power, mode, restore_target
 ) -> None:
     record = with_reported(TELICA_AC, applianceState=power, mode=mode, targetTemperatureF=68)
@@ -114,7 +114,7 @@ async def test_set_heat_sends_power_then_raw_heat_and_restores_off_setpoint(
         "climate", "set_hvac_mode", {"entity_id": heat_climate_id(hass), "hvac_mode": "heat"}, blocking=True
     )
     await hass.async_block_till_done(wait_background_tasks=True)
-    expected = [("executeCommand", frigidaire.Power.ON), ("mode", "HEAT")]
+    expected = [("executeCommand", frigidaire.Power.ON), ("mode", frigidaire.Mode.HEAT)]
     if restore_target:
         expected += [("temperatureRepresentation", frigidaire.Unit.FAHRENHEIT), ("targetTemperatureF", 68)]
     assert stub.commands == expected
@@ -193,7 +193,7 @@ async def test_heat_selection_does_not_override_reported_cooling_activity(hass: 
     assert state.attributes["hvac_action"] == "cooling"
 
 
-async def test_raw_heat_mode_state_is_activity_not_requested_mode(hass: HomeAssistant, setup_entry) -> None:
+async def test_heat_mode_state_is_activity_not_requested_mode(hass: HomeAssistant, setup_entry) -> None:
     await setup_entry(
         [with_reported(TELICA_AC, mode="eco", modeState="heat")],
         options={"AC-TELICA-1": {"heat_supported": True}},
@@ -217,6 +217,19 @@ async def test_unrecognized_heat_without_opt_in_does_not_infer_cooling(hass: Hom
     state = hass.states.get(heat_climate_id(hass))
     assert state.state == "unknown"
     assert "heat" not in state.attributes["hvac_modes"]
+    assert state.attributes.get("hvac_action") is None
+
+
+@pytest.mark.parametrize("mode_state", [None, "fanOnly"])
+async def test_requested_heat_without_opt_in_does_not_use_the_cooling_estimator(
+    hass: HomeAssistant, setup_entry, mode_state
+) -> None:
+    await setup_entry(
+        [with_reported(TELICA_AC, mode="heat", modeState=mode_state, ambientTemperatureF=80, targetTemperatureF=72)],
+        options={"AC-TELICA-1": {"compressor": True}},
+    )
+    state = hass.states.get(heat_climate_id(hass))
+    assert state.state == "unknown"
     assert state.attributes.get("hvac_action") is None
 
 
@@ -285,7 +298,11 @@ async def test_heat_from_off_preserves_temperature_units_and_skips_missing_setpo
     await hass.services.async_call(
         "climate", "set_hvac_mode", {"entity_id": heat_climate_id(hass), "hvac_mode": "heat"}, blocking=True
     )
-    assert stub.commands == [("executeCommand", frigidaire.Power.ON), ("mode", "HEAT"), *expected_setpoint]
+    assert stub.commands == [
+        ("executeCommand", frigidaire.Power.ON),
+        ("mode", frigidaire.Mode.HEAT),
+        *expected_setpoint,
+    ]
 
 
 async def test_polling_heat_activity_changes_does_not_change_requested_heat(hass: HomeAssistant, setup_entry) -> None:
