@@ -26,6 +26,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from frigidaire import ApplianceState, Destination, Detail, FanSpeed, Mode, Unit
 
+from .const import CONF_HEAT_SUPPORTED
 from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
 from .entity import FrigidaireEntity, Optimistic, async_add_appliance_entities
 
@@ -56,6 +57,7 @@ HA_TO_FRIGIDAIRE_UNIT = {v: k for k, v in FRIGIDAIRE_TO_HA_UNIT.items()}
 FRIGIDAIRE_TO_HA_MODE = {
     Mode.OFF: HVACMode.OFF,
     Mode.COOL: HVACMode.COOL,
+    Mode.HEAT: HVACMode.HEAT,
     Mode.FAN: HVACMode.FAN_ONLY,
     Mode.ECO: HVACMode.AUTO,
     Mode.AUTO: HVACMode.AUTO,
@@ -67,6 +69,7 @@ HA_TO_FRIGIDAIRE_HVAC_MODE = {
     HVACMode.AUTO: Mode.ECO,
     HVACMode.FAN_ONLY: Mode.FAN,
     HVACMode.COOL: Mode.COOL,
+    HVACMode.HEAT: Mode.HEAT,
     HVACMode.OFF: Mode.OFF,
     HVACMode.DRY: Mode.DRY,
 }
@@ -76,6 +79,7 @@ HA_TO_FRIGIDAIRE_HVAC_MODE = {
 # mode-derived fallback in hvac_action.
 MODE_STATE_TO_HA_ACTION = {
     Mode.COOL: HVACAction.COOLING,
+    Mode.HEAT: HVACAction.HEATING,
     Mode.FAN: HVACAction.FAN,
     Mode.DRY: HVACAction.DRYING,
 }
@@ -108,6 +112,11 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
     def __init__(self, coordinator: FrigidaireCoordinator, appliance) -> None:
         super().__init__(coordinator, appliance, unique_id=appliance.appliance_id, name=appliance.nickname)
         self._optimistic = Optimistic()
+        # Explicit per-appliance opt-in, never inferred from the model name.
+        options = coordinator.config_entry.options.get(self.appliance_id, {})
+        self._heat_supported = options.get(CONF_HEAT_SUPPORTED, False) is True
+        if self._heat_supported:
+            self._attr_hvac_modes = [*self._attr_hvac_modes, HVACMode.HEAT]
         self._update_swing_support()
 
     def _update_swing_support(self) -> None:
@@ -154,9 +163,12 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
         appliance = self.appliance
         if appliance.state is ApplianceState.OFF:
             return HVACMode.OFF
+        # Heat on a device that has not opted in is unsupported, like any unmapped mode.
         hvac_mode = FRIGIDAIRE_TO_HA_MODE.get(appliance.mode)
-        if hvac_mode is None and appliance.get(Detail.MODE) is not None:
-            _LOGGER.warning("Unsupported HVAC mode '%s' reported by device.", appliance.get(Detail.MODE))
+        if hvac_mode not in self.hvac_modes:
+            if appliance.get(Detail.MODE) is not None:
+                _LOGGER.warning("Unsupported HVAC mode '%s' reported by device.", appliance.get(Detail.MODE))
+            return None
         return hvac_mode
 
     @property
@@ -167,9 +179,18 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
         appliance = self.appliance
         if appliance.state is not ApplianceState.RUNNING:
             return HVACAction.IDLE
+        heating = hvac_mode == HVACMode.HEAT or Mode.HEAT in (appliance.mode, appliance.mode_state)
+        if heating and not self._heat_supported:
+            # Heat on a device that has not opted in: unknown, never a cooling fallback.
+            return None
         # Real compressor telemetry, on models that report it, beats every inference below.
         compressor = appliance.compressor_running
         if compressor is True:
+            if heating:
+                # mode_state can still show the unit cooling or drying while Heat is selected.
+                if appliance.mode_state in (Mode.COOL, Mode.DRY):
+                    return MODE_STATE_TO_HA_ACTION[appliance.mode_state]
+                return HVACAction.HEATING
             return HVACAction.DRYING if hvac_mode == HVACMode.DRY else HVACAction.COOLING
         if compressor is False:
             fan_running = appliance.mode_state is Mode.FAN or hvac_mode == HVACMode.FAN_ONLY
@@ -179,6 +200,10 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
         # the requested mode, which is the user's selection and must not flap.
         if (action := MODE_STATE_TO_HA_ACTION.get(appliance.mode_state)) is not None:
             return action
+        if hvac_mode == HVACMode.HEAT:
+            # Heating has no temperature-based estimate. Without telemetry the activity is
+            # unknown; "idle" is not a library Mode, so it is matched on the raw value.
+            return HVACAction.IDLE if str(appliance.get(Detail.MODE_STATE)).lower() in ("idle", "off") else None
         if hvac_mode == HVACMode.FAN_ONLY:
             return HVACAction.FAN
         # The opt-in temperature-based estimate only refines models without mode_state.
@@ -230,7 +255,7 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
         self.refresh()
 
     def set_hvac_mode(self, hvac_mode: HVACMode) -> None:
-        if (mode := HA_TO_FRIGIDAIRE_HVAC_MODE.get(hvac_mode)) is None:
+        if hvac_mode not in self.hvac_modes or (mode := HA_TO_FRIGIDAIRE_HVAC_MODE.get(hvac_mode)) is None:
             return
         self.client.set_mode(self.appliance, mode)
         self._optimistic.set("hvac_mode", hvac_mode)
