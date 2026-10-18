@@ -15,3 +15,21 @@ jobs:
           python-version: "3.14"
       - run: pip install -r requirements_test.txt
       - run: pytest -q
+
+  # pytest above runs against the pinned (newest) Home Assistant, but HACS offers each release to
+  # every install at or above hacs.json's "homeassistant". This holds the code to that promise: it
+  # imports the integration on exactly that minimum, so using something core gained later (#176)
+  # fails here instead of in users' setup.
+  minimum-home-assistant:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install the minimum Home Assistant from hacs.json
+        run: |
+          minimum=$(jq -r '.homeassistant' hacs.json)
+          echo "Checking against Home Assistant $minimum" >> "$GITHUB_STEP_SUMMARY"
+          pip install "homeassistant==$minimum" $(jq -r '.requirements[]' custom_components/frigidaire/manifest.json)
+      - run: python scripts/check_minimum_version.py
