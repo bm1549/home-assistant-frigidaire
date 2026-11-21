@@ -17,7 +17,11 @@ async def test_config_entry_diagnostics(hass: HomeAssistant, hass_client: Client
 
     diagnostics = await get_diagnostics_for_config_entry(hass, hass_client, entry)
 
-    assert diagnostics["entry"]["data"] == {"username": "**REDACTED**", "password": "**REDACTED**"}
+    assert diagnostics["entry"]["data"] == {
+        "auth_method": "password",
+        "username": "**REDACTED**",
+        "password": "**REDACTED**",
+    }
     records = {a["raw"]["applianceData"]["applianceName"]: a for a in diagnostics["appliances"]}
     assert records["Bedroom AC"]["raw"]["applianceId"] == "**REDACTED**"
     assert records["Bedroom AC"]["raw"]["properties"]["reported"]["mode"] == "COOL"

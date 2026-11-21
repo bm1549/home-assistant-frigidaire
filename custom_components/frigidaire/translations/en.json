@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "Device is already configured",
-            "reauth_successful": "Re-authentication was successful"
+            "reauth_successful": "Re-authentication was successful",
+            "wrong_account": "These credentials belong to a different Frigidaire account than this entry."
         },
         "error": {
             "cannot_connect": "Failed to connect",
@@ -12,6 +13,14 @@
         },
         "step": {
             "user": {
+                "title": "Sign in to Frigidaire",
+                "description": "Choose how you sign in to the Frigidaire app.",
+                "menu_options": {
+                    "password": "Email and password"
+                }
+            },
+            "password": {
+                "title": "Email and password",
                 "data": {
                     "password": "Password",
                     "username": "Username"

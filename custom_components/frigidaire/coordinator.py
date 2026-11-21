@@ -1,4 +1,4 @@
-"""One account-level poll feeds every entity."""
+"""One account-level poll feeds every entity; a command refreshes just its appliance."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ class FrigidaireCoordinator(DataUpdateCoordinator[dict[str, Appliance]]):
 
     async def _async_update_data(self) -> dict[str, Appliance]:
         try:
-            appliances = await self.hass.async_add_executor_job(self.client.get_appliances)
+            appliances = await self.client.get_appliances()
         except AuthenticationError as err:
             raise ConfigEntryAuthFailed(str(err)) from err
         except FrigidaireException as err:
@@ -93,13 +93,33 @@ class FrigidaireCoordinator(DataUpdateCoordinator[dict[str, Appliance]]):
             raise UpdateFailed(describe_error(err), retry_after=backoff.total_seconds()) from err
         self._failures = 0
 
-        data = {appliance.appliance_id: appliance for appliance in appliances}
+        data = {appliance.appliance_id: self._ingest(appliance) for appliance in appliances}
         for appliance_id in set(self.data or {}) - set(data):
             previous = self.data[appliance_id]
             _LOGGER.warning("%s (%s) is no longer on the account", previous.nickname, appliance_id)
-        for appliance in appliances:
-            self._update_compressor_estimate(appliance)
         return data
+
+    async def async_refresh_appliance(self, appliance: Appliance) -> None:
+        """Fetch one appliance's state, after a command, and publish it to every entity.
+
+        A failure is logged and left to the next scheduled fetch, which handles it as usual;
+        rejected credentials start reauth straight away.
+        """
+        try:
+            fresh = await self.client.refresh(appliance)
+        except AuthenticationError:
+            assert self.config_entry is not None
+            self.config_entry.async_start_reauth(self.hass)
+            return
+        except FrigidaireException as err:
+            _LOGGER.warning("Refreshing %s after a command failed: %s", appliance.nickname, describe_error(err))
+            return
+        self.async_set_updated_data({**(self.data or {}), fresh.appliance_id: self._ingest(fresh)})
+
+    def _ingest(self, appliance: Appliance) -> Appliance:
+        """Every fresh snapshot passes through here before entities see it."""
+        self._update_compressor_estimate(appliance)
+        return appliance
 
     def compressor_estimate(self, appliance_id: str) -> bool | None:
         """The opt-in estimate, or None when it is disabled or undecidable for this appliance."""

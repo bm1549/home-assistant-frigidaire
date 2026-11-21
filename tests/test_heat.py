@@ -64,6 +64,7 @@ async def test_heat_option_is_available_during_initial_setup(hass: HomeAssistant
     hass.config.config_dir = str(tmp_path)
     frigidaire_stub([TELICA_AC])
     result = await hass.config_entries.flow.async_init("frigidaire", context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "password"})
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"username": "user@example.com", "password": "secret"}
     )
@@ -138,7 +139,7 @@ async def test_heat_request_without_opt_in_sends_nothing(hass: HomeAssistant, se
         )
     # Guard the entity method too: callers need not go through HA's service validation.
     entity = FrigidaireClimate(entry.runtime_data, entry.runtime_data.data[appliance_id])
-    entity.set_hvac_mode(HVACMode.HEAT)
+    await entity.async_set_hvac_mode(HVACMode.HEAT)
     assert stub.commands == []
 
 
@@ -203,11 +204,10 @@ async def test_heat_mode_state_is_activity_not_requested_mode(hass: HomeAssistan
     assert state.attributes["hvac_action"] == "heating"
 
 
-@pytest.mark.parametrize("filename", ["strings.json", "translations/en.json"])
 @pytest.mark.parametrize("flow", ["config", "options"])
-def test_heat_checkbox_has_an_explicit_english_opt_in_label(filename, flow) -> None:
+def test_heat_checkbox_has_an_explicit_english_opt_in_label(flow) -> None:
     component = Path(__file__).resolve().parents[1] / "custom_components" / "frigidaire"
-    device = json.loads((component / filename).read_text())[flow]["step"]["device"]
+    device = json.loads((component / "translations" / "en.json").read_text())[flow]["step"]["device"]
     assert device["data"]["heat_supported"] == "Enable heat mode (confirmed heat-capable device only)"
     assert "does not detect" in device["data_description"]["heat_supported"]
 
@@ -334,11 +334,11 @@ async def test_failed_heat_command_is_not_optimistically_accepted(
     with (
         patch.object(
             stub,
-            "execute_action",
+            "send",
             side_effect=[None] * (failure_step - 1) + [frigidaire.FrigidaireException("command failed")],
-        ) as execute,
+        ) as send,
         pytest.raises(frigidaire.FrigidaireException, match="command failed"),
     ):
-        entity.set_hvac_mode(HVACMode.HEAT)
-    assert execute.call_count == failure_step
+        await entity.async_set_hvac_mode(HVACMode.HEAT)
+    assert send.call_count == failure_step
     assert entity.hvac_mode == (HVACMode.OFF if failure_step == 3 else HVACMode.FAN_ONLY)

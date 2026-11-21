@@ -13,7 +13,7 @@ Against an unreleased library: `uv pip install -e ../frigidaire`, then deselect 
 
 ## Tests
 
-- `setup_entry` fixture: records in, `(entry, stub)` out. `stub` is `frigidaire.testing.FakeFrigidaire`; assert sent commands on `stub.commands`, parsed data on `entry.runtime_data.data[appliance_id]`.
+- `setup_entry` fixture: records in, `(entry, stub)` out. `stub` is the `frigidaire.testing.FakeBackend` that the password method's `build_backend` patch point returns; assert sent commands on `stub.commands`, parsed data on `entry.runtime_data.data[appliance_id]`.
 - Sample records: `LEGACY_AC` (uppercase firmware), `TELICA_AC` (lowercase), `DEHUMIDIFIER`, adjusted with `with_reported`.
 - Poll: `async_fire_time_changed(now + 31s)` then `async_block_till_done(wait_background_tasks=True)`. Each fire is relative to real now, not the previous fire.
 - Real payloads live in closed issues: #49, #75, #76, #87, #121, frigidaire#25, frigidaire#43.

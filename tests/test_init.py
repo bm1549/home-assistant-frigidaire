@@ -16,9 +16,17 @@ def entity_id_for(hass: HomeAssistant, domain: str, unique_id: str) -> str | Non
     return er.async_get(hass).async_get_entity_id(domain, DOMAIN, unique_id)
 
 
-def make_entry(hass: HomeAssistant) -> MockConfigEntry:
+CREDENTIALS = {"username": "user@example.com", "password": "secret"}
+
+
+def make_entry(hass: HomeAssistant, *, minor_version: int = 2, data: dict | None = None, **kwargs) -> MockConfigEntry:
     entry = MockConfigEntry(
-        domain=DOMAIN, data={"username": "user@example.com", "password": "secret"}, unique_id="user@example.com"
+        domain=DOMAIN,
+        version=kwargs.pop("version", 1),
+        minor_version=minor_version,
+        data={"auth_method": "password", **CREDENTIALS} if data is None else data,
+        unique_id="user@example.com",
+        **kwargs,
     )
     entry.add_to_hass(hass)
     return entry
@@ -131,3 +139,90 @@ async def test_dehumidifier_without_timers_gets_none(hass: HomeAssistant, setup_
     await setup_entry([DEHUMIDIFIER])
 
     assert entity_id_for(hass, "number", "DH-1_timer_on") is None
+
+
+async def test_minor_version_1_entry_migrates_to_the_password_method(
+    hass: HomeAssistant, frigidaire_stub, tmp_path
+) -> None:
+    """Entries from before the sign-in menu signed in with a password; upgrading changes nothing else."""
+    hass.config.config_dir = str(tmp_path)
+    frigidaire_stub([LEGACY_AC, DEHUMIDIFIER])
+    options = {"DH-1": {"bucket_status": True}}
+    entry = make_entry(hass, minor_version=1, data=dict(CREDENTIALS), options=options)
+    # An entity registered by the previous version must keep its entity id.
+    registry = er.async_get(hass)
+    before = registry.async_get_or_create("climate", DOMAIN, "AC-LEGACY-1", config_entry=entry)
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert entry.state is ConfigEntryState.LOADED
+    assert (entry.version, entry.minor_version) == (1, 2)
+    assert entry.data == {"auth_method": "password", **CREDENTIALS}
+    assert entry.options == options
+    assert entry.unique_id == "user@example.com"
+    assert entity_id_for(hass, "climate", "AC-LEGACY-1") == before.entity_id
+    assert entity_id_for(hass, "binary_sensor", "DH-1_bucket_status") is not None
+
+
+async def test_migration_leaves_the_session_file_alone(hass: HomeAssistant, tmp_path) -> None:
+    hass.config.config_dir = str(tmp_path)
+    entry = make_entry(hass, minor_version=1, data=dict(CREDENTIALS))
+    session_file = tmp_path / f"frigidaire-{entry.entry_id}.json"
+    contents = '{"session_key": "kept", "regional_base_url": "https://kept.invalid"}'
+    session_file.write_text(contents)
+
+    assert await entry.async_migrate(hass)
+
+    assert entry.minor_version == 2
+    assert entry.data == {"auth_method": "password", **CREDENTIALS}
+    assert session_file.read_text() == contents
+
+
+async def test_current_entry_is_not_migrated_again(hass: HomeAssistant, setup_entry) -> None:
+    entry, _stub = await setup_entry([LEGACY_AC])
+
+    assert entry.minor_version == 2
+    assert entry.data == {"auth_method": "password", **CREDENTIALS}
+
+
+async def test_entry_from_a_newer_major_version_is_refused(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+    hass.config.config_dir = str(tmp_path)
+    frigidaire_stub([LEGACY_AC])
+    entry = make_entry(hass, version=2, minor_version=1)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+
+    assert entry.state is ConfigEntryState.MIGRATION_ERROR
+    assert entry.data == {"auth_method": "password", **CREDENTIALS}
+
+
+async def test_unknown_sign_in_method_fails_setup(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+    hass.config.config_dir = str(tmp_path)
+    stub = frigidaire_stub([LEGACY_AC])
+    entry = make_entry(hass, data={"auth_method": "carrier_pigeon"})
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert stub.connect_count == 0
+
+
+async def test_unload_closes_the_backend(hass: HomeAssistant, setup_entry) -> None:
+    entry, stub = await setup_entry([LEGACY_AC])
+    assert not stub.closed
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+    assert stub.closed
+
+
+async def test_removing_the_entry_deletes_its_session_file(hass: HomeAssistant, setup_entry, tmp_path) -> None:
+    entry, _stub = await setup_entry([LEGACY_AC])
+    session_file = tmp_path / f"frigidaire-{entry.entry_id}.json"
+    assert os.path.exists(session_file)
+
+    await hass.config_entries.async_remove(entry.entry_id)
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert not os.path.exists(session_file)

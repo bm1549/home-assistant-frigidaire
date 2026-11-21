@@ -17,7 +17,17 @@ CREDENTIALS = {"username": "user@example.com", "password": "secret"}
 
 
 async def start_user_flow(hass: HomeAssistant):
-    return await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    """Open the setup menu and pick email and password, landing on its form."""
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    return await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "password"})
+
+
+async def test_user_flow_starts_with_a_menu_of_sign_in_methods(hass: HomeAssistant) -> None:
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+
+    assert result["type"] is FlowResultType.MENU
+    assert result["step_id"] == "user"
+    assert result["menu_options"] == ["password"]
 
 
 async def test_user_flow_creates_entry_with_per_device_options(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
@@ -26,7 +36,7 @@ async def test_user_flow_creates_entry_with_per_device_options(hass: HomeAssista
 
     result = await start_user_flow(hass)
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "user"
+    assert result["step_id"] == "password"
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
     assert result["step_id"] == "device"
@@ -37,7 +47,7 @@ async def test_user_flow_creates_entry_with_per_device_options(hass: HomeAssista
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == CREDENTIALS
+    assert result["data"] == {"auth_method": "password", **CREDENTIALS}
     assert result["options"]["DH-1"]["bucket_status"] is True
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     assert entry.state is ConfigEntryState.LOADED

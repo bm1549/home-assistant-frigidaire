@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from homeassistant.components.number import NumberDeviceClass, NumberEntity
 from homeassistant.const import UnitOfTime
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from frigidaire import Appliance, ApplianceState, Destination
 
 from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
-from .entity import FrigidaireEntity, Optimistic, async_add_appliance_entities
+from .entity import FrigidaireEntity, async_add_appliance_entities
 
 STEP_SECONDS = 1800  # the appliance snaps timers to 30 minutes
 MAX_SECONDS = 86400  # 24 hours
@@ -47,7 +47,6 @@ class FrigidaireTimerNumber(FrigidaireEntity, NumberEntity):
             name="On Timer" if timer_type == "on" else "Off Timer",
         )
         self._is_on_timer = timer_type == "on"
-        self._optimistic = Optimistic()
 
     @property
     def native_value(self) -> float:
@@ -65,17 +64,11 @@ class FrigidaireTimerNumber(FrigidaireEntity, NumberEntity):
             return 0
         return round(seconds / STEP_SECONDS) * STEP_SECONDS
 
-    def set_native_value(self, value: float) -> None:
+    async def async_set_native_value(self, value: float) -> None:
         seconds = int(round(value / STEP_SECONDS) * STEP_SECONDS)
         seconds = max(0, min(MAX_SECONDS, seconds))
         if self._is_on_timer:
-            self.client.set_start_time(self.appliance, seconds)
+            command = self.client.set_start_time(self.appliance, seconds)
         else:
-            self.client.set_stop_time(self.appliance, seconds)
-        self._optimistic.set("value", float(seconds))
-        self.refresh()
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        self._optimistic.expire()
-        super()._handle_coordinator_update()
+            command = self.client.set_stop_time(self.appliance, seconds)
+        await self.async_command(command, value=float(seconds))

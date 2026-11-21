@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
@@ -83,6 +83,7 @@ class FrigidaireEntity(CoordinatorEntity[FrigidaireCoordinator]):
         self.appliance_id = appliance.appliance_id
         self._appliance = appliance
         self._attr_unique_id = unique_id
+        self._optimistic = Optimistic()
         self._attr_name = name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, appliance.appliance_id)},
@@ -108,11 +109,25 @@ class FrigidaireEntity(CoordinatorEntity[FrigidaireCoordinator]):
     def available(self) -> bool:
         return super().available and self.appliance_id in (self.coordinator.data or {})
 
+    async def async_command(self, command: Awaitable[None], **optimistic: Any) -> None:
+        """Send one library command, then hold ``optimistic`` values and refresh this appliance.
+
+        Every setter goes through here. A failed command raises before anything is held, so the
+        UI never shows a value the appliance did not accept.
+        """
+        await command
+        for key, value in optimistic.items():
+            self._optimistic.set(key, value)
+        if optimistic and self.hass is not None:
+            self.async_write_ha_state()
+        await self.coordinator.async_refresh_appliance(self.appliance)
+
     async def async_update(self) -> None:
-        """Fetch now. Used after a command so the reported state catches up promptly."""
+        """Fetch now, for the update_entity service."""
         if self.enabled:
             await self.coordinator.async_refresh()
 
-    def refresh(self) -> None:
-        """Schedule an immediate poll from a command running in the executor."""
-        self.schedule_update_ha_state(force_refresh=True)
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._optimistic.expire()
+        super()._handle_coordinator_update()

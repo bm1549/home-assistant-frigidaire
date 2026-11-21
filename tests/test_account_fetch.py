@@ -58,7 +58,9 @@ async def test_command_refresh_fetches_fresh_data(hass: HomeAssistant, setup_ent
     )
     await hass.async_block_till_done(wait_background_tasks=True)
 
-    assert stub.fetch_count == 2
+    # The command refreshes just that appliance, not the whole account.
+    assert stub.fetch_count == 1
+    assert stub.record_fetch_count == 1
     # Asserted on coordinator data, not the entity state: for OPTIMISTIC_WINDOW seconds
     # after a command the climate entity reports the optimistic mode, so an entity-state
     # assertion would pass even if the refreshed record never reached the coordinator.
@@ -183,3 +185,54 @@ async def test_returning_appliance_is_not_added_twice(hass: HomeAssistant, setup
     humidifiers = [e for e in registry.entities.values() if e.domain == "humidifier"]
     assert len(humidifiers) == 1
     assert state_of(hass, "humidifier", "DH-1") == "on"
+
+
+async def test_failed_refresh_after_a_command_keeps_the_last_snapshot(
+    hass: HomeAssistant, setup_entry, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The command went through; a failed follow-up read is left to the next scheduled fetch."""
+    entry, stub = await setup_entry(THREE)
+    stub.error = frigidaire.FrigidaireException("Request failed", status_code=503)
+
+    await hass.services.async_call(
+        "climate", "set_hvac_mode", {"entity_id": climate_id(hass), "hvac_mode": "fan_only"}, blocking=True
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert stub.commands == [("executeCommand", frigidaire.Power.ON), ("mode", frigidaire.Mode.FAN)]
+    assert stub.record_fetch_count == 1
+    assert entry.runtime_data.last_update_success
+    assert entry.runtime_data.data["AC-LEGACY-1"].mode is frigidaire.Mode.COOL
+    assert state_of(hass, "climate", "AC-LEGACY-1") == "fan_only"  # held optimistically
+    assert "Refreshing Bedroom AC after a command failed" in caplog.text
+    assert "status=503" in caplog.text
+
+
+async def test_rejected_credentials_on_the_refresh_after_a_command_start_reauth(
+    hass: HomeAssistant, setup_entry
+) -> None:
+    entry, stub = await setup_entry(THREE)
+    stub.error = frigidaire.AuthenticationError("Failed to authenticate")
+
+    await hass.services.async_call(
+        "climate", "set_hvac_mode", {"entity_id": climate_id(hass), "hvac_mode": "fan_only"}, blocking=True
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert [flow["context"]["source"] for flow in flows] == ["reauth"]
+    assert flows[0]["context"]["entry_id"] == entry.entry_id
+
+
+async def test_command_refresh_leaves_other_appliances_untouched(hass: HomeAssistant, setup_entry) -> None:
+    entry, stub = await setup_entry(THREE)
+    before = entry.runtime_data.data["DH-1"]
+    stub.records["DH-1"]["properties"]["reported"]["targetHumidity"] = 42
+
+    await hass.services.async_call(
+        "climate", "set_hvac_mode", {"entity_id": climate_id(hass), "hvac_mode": "fan_only"}, blocking=True
+    )
+    await hass.async_block_till_done(wait_background_tasks=True)
+
+    assert entry.runtime_data.data["DH-1"] is before
+    assert set(entry.runtime_data.data) == {"AC-LEGACY-1", "AC-TELICA-1", "DH-1"}
