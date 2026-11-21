@@ -66,7 +66,11 @@ def _describe(appliance: Appliance) -> dict[str, Any]:
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: FrigidaireConfigEntry) -> dict[str, Any]:
     coordinator = entry.runtime_data
     return {
-        "entry": {"data": async_redact_data(dict(entry.data), TO_REDACT), "options": dict(entry.options)},
+        "entry": {
+            "data": async_redact_data(dict(entry.data), TO_REDACT),
+            # Options are keyed by appliance id, which encodes the serial number; list them by position instead.
+            "options": {f"appliance_{index}": options for index, options in enumerate(entry.options.values())},
+        },
         "last_update_success": coordinator.last_update_success,
         "appliances": [_describe(appliance) for appliance in (coordinator.data or {}).values()],
     }
