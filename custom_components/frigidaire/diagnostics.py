@@ -69,10 +69,19 @@ def _describe(appliance: Appliance) -> dict[str, Any]:
     return {"parsed": parsed, "raw": async_redact_data(appliance.raw, TO_REDACT)}
 
 
+def _options(entry: FrigidaireConfigEntry) -> dict[str, Any]:
+    """The per-appliance options, keyed by position instead of appliance id.
+
+    Options are keyed by appliance id, and Electrolux appliance ids are built from the serial
+    number, which the records have redacted.
+    """
+    return {f"appliance_{index}": options for index, options in enumerate(entry.options.values())}
+
+
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: FrigidaireConfigEntry) -> dict[str, Any]:
     coordinator = entry.runtime_data
     return {
-        "entry": {"data": async_redact_data(dict(entry.data), TO_REDACT), "options": dict(entry.options)},
+        "entry": {"data": async_redact_data(dict(entry.data), TO_REDACT), "options": _options(entry)},
         "auth_method": entry.data.get("auth_method"),
         "live_updates": coordinator.client.supports_live_updates,
         "stream_connected": coordinator.stream_connected,

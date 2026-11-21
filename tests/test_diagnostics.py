@@ -16,19 +16,21 @@ from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 DOMAIN = "frigidaire"
 
 
-async def test_config_entry_diagnostics(hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry) -> None:
-    entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
+@pytest.mark.parametrize("auth_method", ["password", "api_key"])
+async def test_config_entry_diagnostics(
+    hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry, method
+) -> None:
+    entry, stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
 
     diagnostics = await get_diagnostics_for_config_entry(hass, hass_client, entry)
 
     assert diagnostics["entry"]["data"] == {
-        "auth_method": "password",
-        "username": "**REDACTED**",
-        "password": "**REDACTED**",
+        "auth_method": method.name,
+        **{key: "**REDACTED**" for key in method.setup_input},
     }
-    assert diagnostics["auth_method"] == "password"
-    assert diagnostics["live_updates"] is False
-    assert diagnostics["stream_connected"] is False
+    assert diagnostics["auth_method"] == method.name
+    assert diagnostics["live_updates"] is stub.supports_live_updates
+    assert diagnostics["stream_connected"] is stub.supports_live_updates
     records = {a["raw"]["applianceData"]["applianceName"]: a for a in diagnostics["appliances"]}
     assert records["Bedroom AC"]["raw"]["applianceId"] == "**REDACTED**"
     assert records["Bedroom AC"]["raw"]["properties"]["reported"]["mode"] == "COOL"
@@ -36,6 +38,23 @@ async def test_config_entry_diagnostics(hass: HomeAssistant, hass_client: Client
     assert records["Bedroom AC"]["parsed"]["destination"] == "AC"
     assert records["Bedroom AC"]["parsed"]["mode"] == "COOL"
     assert records["Basement Dehumidifier"]["parsed"]["destination"] == "DH"
+
+
+async def test_config_entry_diagnostics_hide_appliance_ids_in_the_options(
+    hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry
+) -> None:
+    """Options are keyed by appliance id, which Electrolux builds from the serial number."""
+    entry, _stub = await setup_entry(
+        [LEGACY_AC, DEHUMIDIFIER], options={"DH-1": {"bucket_status": True}, "AC-LEGACY-1": {"ui_lock": True}}
+    )
+
+    diagnostics = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+
+    # In the entry's options order, under placeholders.
+    assert diagnostics["entry"]["options"] == {"appliance_0": {"bucket_status": True}, "appliance_1": {"ui_lock": True}}
+    dumped = json.dumps(diagnostics)
+    for appliance_id in ("DH-1", "AC-LEGACY-1"):
+        assert appliance_id not in dumped
 
 
 async def test_device_diagnostics_returns_only_that_appliance(
@@ -86,7 +105,7 @@ async def test_api_key_entry_diagnostics_redact_the_key_tokens_and_serial(
     assert info["serialNumber"] == "**REDACTED**"
     assert info["model"] == "FHWW083WA1"
     dumped = json.dumps(diagnostics)
-    for secret in ("the-api-key", "access-1", "refresh-1", "SN-12345"):
+    for secret in ("the-api-key", "access-1", "refresh-1", "SN-12345", "AC-LEGACY-1"):
         assert secret not in dumped
 
 
