@@ -1,5 +1,7 @@
 """Diagnostics downloads carry the raw records with personal fields redacted."""
 
+import json
+
 from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -39,3 +41,20 @@ async def test_device_diagnostics_returns_only_that_appliance(
     assert diagnostics["raw"]["applianceData"]["applianceName"] == "Basement Dehumidifier"
     assert diagnostics["raw"]["applianceId"] == "**REDACTED**"
     assert diagnostics["parsed"]["target_humidity"] == 45
+
+
+async def test_config_entry_diagnostics_keep_appliance_ids_out_of_options(
+    hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry
+) -> None:
+    options = {"AC-LEGACY-1": {"display_light": True}, "DH-1": {"bucket_status": True}}
+    entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER], options=options)
+
+    diagnostics = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+
+    assert diagnostics["entry"]["options"] == {
+        "appliance_0": {"display_light": True},
+        "appliance_1": {"bucket_status": True},
+    }
+    dumped = json.dumps(diagnostics)
+    assert "AC-LEGACY-1" not in dumped
+    assert "DH-1" not in dumped
