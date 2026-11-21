@@ -166,7 +166,12 @@ async def test_user_flow_without_appliances_shows_no_appliances(
 async def test_user_flow_aborts_for_an_already_configured_account(hass: HomeAssistant, setup_entry, method) -> None:
     await setup_entry([LEGACY_AC])
 
-    result = await submit_setup(hass, method)
+    # The same account, signed in again with other credentials (the same API tokens are refused
+    # sooner, see test_auth_api_key).
+    result = await start_user_flow(hass, method.name)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**method.setup_input, **method.reauth_input}
+    )
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
@@ -247,7 +252,9 @@ async def test_reauth_with_wrong_credentials_shows_invalid_auth(hass: HomeAssist
     assert entry.data == method.entry_data
 
 
-@both_methods
+# A password entry's reauth asks only for the password and keeps the username, so it cannot reach
+# another account; an API key entry's new tokens can.
+@pytest.mark.parametrize("auth_method", ["api_key"])
 async def test_reauth_with_another_accounts_credentials_aborts(
     hass: HomeAssistant, setup_entry, poll, settle, method
 ) -> None:

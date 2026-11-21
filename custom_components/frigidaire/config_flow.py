@@ -13,7 +13,7 @@ from homeassistant.config_entries import ConfigFlowResult
 import frigidaire
 
 from .auth import METHODS
-from .auth.errors import CannotConnect, InvalidAuth
+from .auth.errors import CannotConnect, CredentialsInUse, InvalidAuth
 from .const import (
     BINARY_SENSOR_OPTIONS,
     CONF_COMPRESSOR_ESTIMATE,
@@ -102,6 +102,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data = dict(user_input)
             try:
                 email, appliances = await module.async_validate(self.hass, data)
+            except CredentialsInUse:
+                errors["base"] = "credentials_in_use"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidAuth:
@@ -165,6 +167,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data = {**entry.data, **user_input}
             try:
                 email, _appliances = await module.async_validate(self.hass, data, entry)
+            except CredentialsInUse:
+                errors["base"] = "credentials_in_use"
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
             except CannotConnect:
@@ -180,7 +184,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reauth_confirm",
             data_schema=_form_schema(self, module.REAUTH_SCHEMA, user_input, data),
-            description_placeholders={"username": entry.unique_id or entry.title},
+            description_placeholders=module.reauth_description_placeholders(entry),
             errors=errors,
         )
 

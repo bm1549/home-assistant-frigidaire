@@ -1,4 +1,4 @@
-"""The API key sign-in module: validation, token persistence and cautious reauth."""
+"""The API key sign-in module: validation, token persistence and when reauth starts."""
 
 from datetime import timedelta
 from unittest.mock import patch
@@ -35,11 +35,10 @@ async def open_form(hass: HomeAssistant) -> dict:
     return await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "api_key"})
 
 
-def test_api_key_is_the_second_menu_entry_and_in_beta() -> None:
-    assert list(METHODS) == ["password", "api_key"]
+def test_api_key_is_the_last_menu_entry() -> None:
+    assert list(METHODS)[-1] == "api_key"
     assert METHODS["api_key"] is api_key
     assert api_key.METHOD == "api_key"
-    assert api_key.BETA is True
     assert api_key.RESYNC_INTERVAL == timedelta(minutes=5)
 
 
@@ -178,90 +177,151 @@ async def test_an_unloadable_token_at_setup_starts_reauth(
     assert len(reauth_flows(hass)) == 1
 
 
-# --- a failed token refresh is retried once before asking for new credentials ---
-
-
-async def test_one_failed_token_refresh_does_not_start_reauth(
-    hass: HomeAssistant, setup_entry, poll, caplog: pytest.LogCaptureFixture
+async def test_rotation_by_a_backend_the_entry_no_longer_uses_is_not_saved(
+    hass: HomeAssistant, setup_entry, settle, method
 ) -> None:
-    """The SDK reports a refresh lost to a network blip the same way as a refused one."""
+    """A request still in flight on the old backend after reauth must not undo the new tokens."""
     entry, stub = await setup_entry([LEGACY_AC])
-    stub.error = frigidaire.AuthenticationError("Token refresh failed")
+    old_callback = stub.on_tokens
+    result = await entry.start_reauth_flow(hass)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], method.reauth_input)
+    assert result["type"] is FlowResultType.ABORT and result["reason"] == "reauth_successful"
+    await settle()
+    assert entry.data["refresh_token"] == "refresh-2"
+
+    old_callback("access-OLD-rotated", "refresh-OLD-rotated")
+
+    assert (entry.data["access_token"], entry.data["refresh_token"]) == ("access-2", "refresh-2")
+    # The backend the entry uses now still saves its rotations.
+    stub.rotate("access-3", "refresh-3")
+    assert (entry.data["access_token"], entry.data["refresh_token"]) == ("access-3", "refresh-3")
+
+
+async def test_adding_the_tokens_an_entry_holds_is_refused_before_any_call(
+    hass: HomeAssistant, setup_entry, settle
+) -> None:
+    """Validating them would spend the entry's refresh token, and the rotated pair would be lost."""
+    entry, stub = await setup_entry([LEGACY_AC])
+    connects = stub.connect_count
+    stub.rotate_on_connect = ("access-NEW", "refresh-NEW")
+
+    result = await open_form(hass)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {key: f" {entry.data[key]} " for key in api_key.CREDENTIAL_KEYS}
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "credentials_in_use"}
+    assert stub.connect_count == connects
+    assert entry.data["refresh_token"] == "refresh-1"
+
+
+async def test_reauth_refuses_the_tokens_another_entry_holds(
+    hass: HomeAssistant, setup_entry, add_entry, method, settle
+) -> None:
+    entry, stub = await setup_entry([LEGACY_AC])
+    other = add_entry(data={**method.entry_data, "refresh_token": "refresh-other"})
+    result = await entry.start_reauth_flow(hass)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {**method.reauth_input, "refresh_token": "refresh-other"}
+    )
+
+    assert result["errors"] == {"base": "credentials_in_use"}
+    assert other.data["refresh_token"] == "refresh-other"
+
+
+async def test_reauth_may_reuse_the_entrys_own_tokens(hass: HomeAssistant, setup_entry, method, settle) -> None:
+    entry, stub = await setup_entry([LEGACY_AC])
+    result = await entry.start_reauth_flow(hass)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {key: entry.data[key] for key in api_key.CREDENTIAL_KEYS}
+    )
+
+    assert result["type"] is FlowResultType.ABORT and result["reason"] == "reauth_successful"
+
+
+async def test_reauth_form_names_the_account_email(hass: HomeAssistant, setup_entry) -> None:
+    entry, _stub = await setup_entry([LEGACY_AC])
+
+    result = await entry.start_reauth_flow(hass)
+
+    assert result["description_placeholders"]["username"] == "user@example.com"
+
+
+# --- an AuthenticationError means reauth; a refresh that got no answer backs off ---
+
+
+@pytest.mark.parametrize("status", [None, 400, 401, 403])
+async def test_any_authentication_error_starts_reauth(hass: HomeAssistant, setup_entry, poll, status) -> None:
+    """The library reports a refresh token the server refused, with or without a status, this way."""
+    entry, stub = await setup_entry([LEGACY_AC])
+    stub.error = frigidaire.AuthenticationError("Rejected", status_code=status)
 
     await poll()
-
-    assert reauth_flows(hass) == []
-    assert entry.state is ConfigEntryState.LOADED
-    assert "retrying before asking to sign in again" in caplog.text
-
-
-async def test_a_repeated_failed_token_refresh_starts_reauth(hass: HomeAssistant, setup_entry, poll) -> None:
-    entry, stub = await setup_entry([LEGACY_AC])
-    stub.error = frigidaire.AuthenticationError("Token refresh failed")
-
-    await poll()
-    assert reauth_flows(hass) == []
-    # The failure backed off; the retry fails the same way.
-    await poll(seconds=601)
 
     flows = reauth_flows(hass)
     assert len(flows) == 1
     assert flows[0]["context"]["entry_id"] == entry.entry_id
 
 
-async def test_a_success_in_between_clears_the_suspicion(hass: HomeAssistant, setup_entry, poll) -> None:
-    _entry, stub = await setup_entry([LEGACY_AC])
-    stub.error = frigidaire.AuthenticationError("Token refresh failed")
+# How the library reports a token refresh that got no answer: not a verdict on the tokens.
+NO_ANSWER = "Could not refresh the Electrolux access token: ClientConnectorError, no HTTP status"
+
+
+async def test_a_refresh_without_an_answer_backs_off_and_recovers_without_reauth(
+    hass: HomeAssistant, setup_entry, poll
+) -> None:
+    entry, stub = await setup_entry([LEGACY_AC])
+    stub.error = frigidaire.FrigidaireException(NO_ANSWER)
+
     await poll()
-    stub.error = None
     await poll(seconds=601)
-    assert stub.fetch_count == 3
+    await poll(seconds=1201)
+    assert reauth_flows(hass) == []
+    assert not entry.runtime_data.last_update_success
 
-    stub.error = frigidaire.AuthenticationError("Token refresh failed")
-    await poll()
+    stub.error = None
+    await poll(seconds=1801)
 
+    assert entry.runtime_data.last_update_success
+    assert entry.state is ConfigEntryState.LOADED
     assert reauth_flows(hass) == []
 
 
-async def test_a_rejection_with_an_http_status_starts_reauth_at_once(hass: HomeAssistant, setup_entry, poll) -> None:
-    _entry, stub = await setup_entry([LEGACY_AC])
-    stub.error = frigidaire.AuthenticationError("Rejected", status_code=403)
-
-    await poll()
-
-    assert len(reauth_flows(hass)) == 1
-
-
-async def test_a_failed_token_refresh_at_setup_retries_then_starts_reauth(
-    hass: HomeAssistant, frigidaire_stub, add_entry, method, settle
+async def test_a_power_cut_with_an_expired_token_recovers_without_reauth(
+    hass: HomeAssistant, frigidaire_stub, add_entry, method, poll
 ) -> None:
-    """The count survives a setup retry, which builds a new backend, so real reauth is only delayed."""
+    """Home Assistant starts before the network is back while the access token needs a refresh.
+
+    Setup keeps retrying instead of asking for new tokens, and loads once the network returns.
+    """
     stub = frigidaire_stub([LEGACY_AC])
-    stub.error = frigidaire.AuthenticationError("Token refresh failed")
+    stub.error = frigidaire.FrigidaireException(NO_ANSWER)
     entry = add_entry(data=method.entry_data)
 
     assert not await hass.config_entries.async_setup(entry.entry_id)
     assert entry.state is ConfigEntryState.SETUP_RETRY
+    await poll(seconds=6)  # Home Assistant's first setup retry, still offline
+    assert entry.state is ConfigEntryState.SETUP_RETRY
     assert reauth_flows(hass) == []
 
-    await hass.config_entries.async_reload(entry.entry_id)
-    await settle()
-
-    assert entry.state is ConfigEntryState.SETUP_ERROR
-    assert len(reauth_flows(hass)) == 1
-
-
-async def test_a_failed_token_refresh_at_setup_then_success_loads(
-    hass: HomeAssistant, frigidaire_stub, add_entry, method, settle
-) -> None:
-    stub = frigidaire_stub([LEGACY_AC])
-    stub.error = frigidaire.AuthenticationError("Token refresh failed")
-    entry = add_entry(data=method.entry_data)
-    assert not await hass.config_entries.async_setup(entry.entry_id)
-
     stub.error = None
-    await hass.config_entries.async_reload(entry.entry_id)
-    await settle()
+    await poll(seconds=3600)
 
     assert entry.state is ConfigEntryState.LOADED
     assert reauth_flows(hass) == []
+
+
+async def test_an_authentication_error_at_setup_starts_reauth(
+    hass: HomeAssistant, frigidaire_stub, add_entry, method
+) -> None:
+    stub = frigidaire_stub([LEGACY_AC])
+    stub.error = frigidaire.AuthenticationError("Rejected")
+    entry = add_entry(data=method.entry_data)
+
+    assert not await hass.config_entries.async_setup(entry.entry_id)
+
+    assert entry.state is ConfigEntryState.SETUP_ERROR
+    assert len(reauth_flows(hass)) == 1

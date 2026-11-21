@@ -7,6 +7,7 @@
         },
         "error": {
             "cannot_connect": "Failed to connect",
+            "credentials_in_use": "These tokens are the ones an entry that is already set up is using. Checking them here would use up its refresh token. Generate new tokens on the Electrolux developer portal for this entry.",
             "invalid_auth": "Invalid authentication",
             "no_appliances": "No Frigidaire appliances found on this account.",
             "unknown": "Unexpected error"

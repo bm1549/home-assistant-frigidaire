@@ -23,7 +23,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: FrigidaireConfigEntry) -
     """Set up frigidaire from a config entry."""
     method = entry.data.get("auth_method")
     if (module := METHODS.get(method)) is None:
-        raise ConfigEntryError(f"Unknown sign-in method {method!r}; delete this entry and add it again")
+        raise ConfigEntryError(
+            f"The sign-in method {method!r} is not available; delete this entry and add it again, "
+            "with an API key from the Electrolux developer portal"
+        )
 
     client: frigidaire.Frigidaire | None = None
     try:

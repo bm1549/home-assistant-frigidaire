@@ -25,4 +25,5 @@ Against an unreleased library: `uv pip install -e ../frigidaire`, then deselect 
 - No maintainer hardware. Land a change unconfirmed only if its worst case is "does not help on some model", never "existing behaviour breaks".
 - Unique IDs, entity names, attribute keys and option keys are user-facing. Keep them.
 - Every push to main auto-releases a patch bump. `manifest.json` and `requirements_test.txt` must pin the same published library version; a library release auto-opens a bump PR here.
+- The API key method is labelled beta only in text: `translations/en.json` (the menu option, the `api_key` step title and the sentence ending its description) and the README. Ending beta means editing that text; no code reads a flag.
 - Commit messages: one subject line, no body, no trailers.

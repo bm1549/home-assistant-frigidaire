@@ -150,14 +150,16 @@ while it gains real-world use.
    three values.
 
 Changes reach Home Assistant through a live event stream as they happen, and the integration
-fetches everything again every 5 minutes (and after the stream reconnects) to stay in step. This
-keeps well inside the free plan's daily request quota; if the quota is used up anyway, the
-integration waits as long as the API asks before trying again.
+fetches everything again every 5 minutes (and after the stream reconnects, at most once per 5
+minutes) to stay in step. This keeps well inside the free plan's daily request quota; if the quota
+is used up anyway, the integration waits as long as the API asks before trying again. If the
+network is down when the access token needs refreshing, the integration keeps retrying and recovers
+by itself once it is back; it asks to re-authenticate only when the API rejects the tokens.
 
 **Refresh tokens work only once.** Home Assistant swaps the token pair for a new one as it goes and
 saves the new pair at once. If two Home Assistant instances, or Home Assistant and a script, share
 one token pair, the first to refresh it signs the other out. Generate a separate API key and token
-pair for each.
+pair for each. For the same reason the setup form refuses the tokens an entry already uses.
 
 ### Changing the sign-in method
 

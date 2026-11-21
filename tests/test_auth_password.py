@@ -15,6 +15,12 @@ from custom_components.frigidaire.auth.errors import CannotConnect, InvalidAuth
 CREDENTIALS = {"username": "User@Example.com", "password": "secret"}
 
 
+@pytest.fixture
+def auth_method() -> str:
+    """Every test here runs against the password method."""
+    return "password"
+
+
 def write_session(path, key: str, url: str) -> None:
     path.write_text(json.dumps({"session_key": key, "regional_base_url": url}))
 
@@ -32,7 +38,6 @@ def test_password_is_the_first_menu_entry() -> None:
     assert list(METHODS)[0] == "password"
     assert METHODS["password"] is password
     assert password.METHOD == "password"
-    assert password.BETA is False
     assert password.RESYNC_INTERVAL == timedelta(seconds=30)
     assert password.RATE_LIMIT_ERRORS == (frigidaire.SessionCapError,)
 
@@ -117,3 +122,13 @@ async def test_remove_tolerates_a_missing_session_file(hass: HomeAssistant, setu
     (tmp_path / f"frigidaire-{entry.entry_id}.json").unlink()
 
     await password.async_remove(hass, entry)
+
+
+async def test_reauth_form_shows_the_username_as_typed(hass: HomeAssistant, frigidaire_stub, add_entry, method) -> None:
+    """Not the lowercased unique id, and not the entry title when an old entry has no unique id."""
+    frigidaire_stub([LEGACY_AC])
+    entry = add_entry(data={**method.entry_data, "username": "User@Example.com"})
+
+    result = await entry.start_reauth_flow(hass)
+
+    assert result["description_placeholders"]["username"] == "User@Example.com"

@@ -25,7 +25,6 @@ import frigidaire
 from .errors import CannotConnect, InvalidAuth
 
 METHOD = "password"
-BETA = False
 RESYNC_INTERVAL = timedelta(seconds=30)
 SCHEMA = vol.Schema({"username": str, "password": str})
 REAUTH_SCHEMA = vol.Schema({vol.Required("password"): str})
@@ -111,6 +110,11 @@ def create_backend(hass: HomeAssistant, entry: ConfigEntry) -> frigidaire.Backen
     """The backend for a configured entry, reusing its saved session while the server accepts it."""
     store = _EntrySessionStore(_session_path(hass, entry.entry_id), _session_path(hass, None))
     return build_backend(entry.data["username"], entry.data["password"], store)
+
+
+def reauth_description_placeholders(entry: ConfigEntry) -> dict[str, str]:
+    """What the reauth form's description shows: the username as it was typed."""
+    return {"username": entry.data.get("username") or entry.unique_id or entry.title}
 
 
 async def async_remove(hass: HomeAssistant, entry: ConfigEntry) -> None:

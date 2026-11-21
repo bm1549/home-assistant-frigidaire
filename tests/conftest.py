@@ -224,7 +224,11 @@ async def _settle(hass: HomeAssistant) -> None:
     """
     while True:
         await hass.async_block_till_done()
-        pending = [task for task in hass._background_tasks if not task.done() and task.get_name() != STREAM_TASK_NAME]
+        pending = [
+            task
+            for task in hass._background_tasks
+            if not task.done() and getattr(task, "get_name", lambda: None)() != STREAM_TASK_NAME
+        ]
         if not pending:
             return
         await asyncio.wait(pending)
