@@ -113,7 +113,7 @@ cannot override the Frigidaire climate entity's own `hvac_action` property.
 2. Go to **Integrations** and search for **Frigidaire**.
 3. Click **Download** and restart Home Assistant.
 4. Go to **Settings → Devices & Services → Add Integration** and search for **Frigidaire**.
-5. Enter your Frigidaire account email and password.
+5. Choose a sign-in method (see [Signing in](#signing-in)) and enter its details.
 
 ### Manual
 
@@ -121,9 +121,50 @@ cannot override the Frigidaire climate entity's own `hvac_action` property.
 2. Copy the `custom_components/frigidaire/` folder into `/config/custom_components/frigidaire/` on your HA instance.
 3. Restart Home Assistant.
 4. Go to **Settings → Devices & Services → Add Integration** and search for **Frigidaire**.
-5. Enter your Frigidaire account email and password.
+5. Choose a sign-in method (see [Signing in](#signing-in)) and enter its details.
 
 Appliances added to your Frigidaire account appear on the next poll without a reload.
+
+## Signing in
+
+Setup starts by asking how you sign in. Each entry uses one method for its whole life.
+
+### Email and password
+
+For accounts that sign in to the Frigidaire app with an email address and password. Enter the
+same email and password as in the app. The integration polls the cloud every 30 seconds.
+
+Existing entries use this method and keep working unchanged after upgrading.
+
+### API key (beta)
+
+For accounts that sign in to the Frigidaire app with **Google or Apple**, which have no password
+to enter, or for anyone who prefers the official Electrolux API. This method is labelled **beta**
+while it gains real-world use.
+
+1. Sign in to the [Electrolux developer portal](https://developer.electrolux.one/dashboard) with your
+   Frigidaire account.
+2. Create an API key. The portal shows three values: the **API key**, an **access token** and a
+   **refresh token**.
+3. In Home Assistant, choose **API key (beta), required for Google or Apple sign-in** and paste the
+   three values.
+
+Changes reach Home Assistant through a live event stream as they happen, and the integration
+fetches everything again every 5 minutes (and after the stream reconnects) to stay in step. This
+keeps well inside the free plan's daily request quota; if the quota is used up anyway, the
+integration waits as long as the API asks before trying again.
+
+**Refresh tokens work only once.** Home Assistant swaps the token pair for a new one as it goes and
+saves the new pair at once. If two Home Assistant instances, or Home Assistant and a script, share
+one token pair, the first to refresh it signs the other out. Generate a separate API key and token
+pair for each.
+
+### Changing the sign-in method
+
+There is no switch between methods. To change, delete the Frigidaire entry under
+**Settings → Devices & Services** and add the integration again with the other method. The same
+account cannot be set up twice, so the old entry must go first. Entity history and per-appliance
+options (the extra controls chosen during setup) do not carry over, so note them before deleting.
 
 ## Reporting a problem
 
@@ -143,8 +184,8 @@ The 0.1.27 release introduces device grouping, per-device switch configuration, 
 ## If something goes wrong
 
 - **Integration doesn't show up in the list?** Restart HA one more time. Also double-check the folder path — it should be `/config/custom_components/frigidaire/`, not nested deeper.
-- **Login keeps failing?** Make sure you're using the same email and password as the Frigidaire mobile app. No extra spaces.
-- **Changed your Frigidaire password?** Home Assistant shows a **Re-authenticate** prompt on the integration; enter the new password there and the entry reloads. No need to remove and re-add it.
+- **Login keeps failing?** Make sure you're using the same email and password as the Frigidaire mobile app. No extra spaces. If you sign in to the app with Google or Apple, use the [API key](#api-key-beta) method instead.
+- **Changed your Frigidaire password, or the API key stopped working?** Home Assistant shows a **Re-authenticate** prompt on the integration; enter the new password, or a new API key, access token and refresh token from the developer portal, and the entry reloads. No need to remove and re-add it. The prompt keeps the entry's method; see [Changing the sign-in method](#changing-the-sign-in-method) to switch.
 - **No devices after a successful login?** Open the Frigidaire app and confirm your appliances are online there. If the app can't see them, HA won't either.
 
 Found a bug or have an idea? Open an [issue](https://github.com/bm1549/home-assistant-frigidaire/issues). PRs are welcome too.

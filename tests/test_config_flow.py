@@ -1,4 +1,7 @@
-"""User setup flow and the reauth flow started when credentials stop working."""
+"""User setup flow and the reauth flow started when credentials stop working.
+
+The setup and reauth tests are written once and run for each sign-in method.
+"""
 
 from datetime import timedelta
 
@@ -15,11 +18,28 @@ from pytest_homeassistant_custom_component.common import async_fire_time_changed
 DOMAIN = "frigidaire"
 CREDENTIALS = {"username": "user@example.com", "password": "secret"}
 
+both_methods = pytest.mark.parametrize("auth_method", ["password", "api_key"])
 
-async def start_user_flow(hass: HomeAssistant):
-    """Open the setup menu and pick email and password, landing on its form."""
+
+async def start_user_flow(hass: HomeAssistant, method: str = "password"):
+    """Open the setup menu and pick a sign-in method, landing on its form."""
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-    return await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": "password"})
+    return await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": method})
+
+
+async def submit_setup(hass: HomeAssistant, method):
+    """Pick the method from the menu and submit its form with the method's setup input."""
+    result = await start_user_flow(hass, method.name)
+    return await hass.config_entries.flow.async_configure(result["flow_id"], dict(method.setup_input))
+
+
+async def start_reauth(hass: HomeAssistant, stub, poll, method) -> dict:
+    """Make the next fetch fail with rejected credentials and return the reauth flow it starts."""
+    stub.error = method.auth_error()
+    await poll()
+    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+    assert len(flows) == 1
+    return flows[0]
 
 
 async def test_user_flow_starts_with_a_menu_of_sign_in_methods(hass: HomeAssistant) -> None:
@@ -27,42 +47,66 @@ async def test_user_flow_starts_with_a_menu_of_sign_in_methods(hass: HomeAssista
 
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "user"
-    assert result["menu_options"] == ["password"]
+    # Email and password first; the API key, for Google or Apple sign-in, second.
+    assert result["menu_options"] == ["password", "api_key"]
 
 
-async def test_user_flow_creates_entry_with_per_device_options(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+@both_methods
+async def test_user_flow_creates_entry_with_per_device_options(
+    hass: HomeAssistant, frigidaire_stub, method, settle, tmp_path
+) -> None:
     hass.config.config_dir = str(tmp_path)
-    frigidaire_stub([LEGACY_AC, DEHUMIDIFIER])
+    stub = frigidaire_stub([LEGACY_AC, DEHUMIDIFIER])
 
-    result = await start_user_flow(hass)
+    result = await start_user_flow(hass, method.name)
     assert result["type"] is FlowResultType.FORM
-    assert result["step_id"] == "password"
+    assert result["step_id"] == method.name
 
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], dict(method.setup_input))
     assert result["step_id"] == "device"
     assert result["description_placeholders"] == {"device_name": "Bedroom AC"}
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["description_placeholders"] == {"device_name": "Basement Dehumidifier"}
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"bucket_status": True})
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
 
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["data"] == {"auth_method": "password", **CREDENTIALS}
+    assert result["data"] == method.entry_data
     assert result["options"]["DH-1"]["bucket_status"] is True
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     assert entry.state is ConfigEntryState.LOADED
     assert entry.unique_id == "user@example.com"
+    assert stub.credentials == method.setup_input
 
 
-async def test_user_flow_rejected_credentials_show_invalid_auth(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+@both_methods
+async def test_user_flow_unique_id_is_the_lowercased_account_email(
+    hass: HomeAssistant, frigidaire_stub, method, settle, tmp_path
+) -> None:
+    hass.config.config_dir = str(tmp_path)
+    stub = frigidaire_stub([LEGACY_AC])
+    stub.email = "User@Example.com"
+
+    result = await submit_setup(hass, method)
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    await settle()
+
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert hass.config_entries.async_entries(DOMAIN)[0].unique_id == "user@example.com"
+
+
+@both_methods
+async def test_user_flow_rejected_credentials_show_invalid_auth(
+    hass: HomeAssistant, frigidaire_stub, method, tmp_path
+) -> None:
     hass.config.config_dir = str(tmp_path)
     stub = frigidaire_stub([LEGACY_AC])
     stub.error = frigidaire.AuthenticationError("Failed to authenticate")
 
-    result = await start_user_flow(hass)
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+    result = await submit_setup(hass, method)
 
     assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == method.name
     assert result["errors"] == {"base": "invalid_auth"}
 
 
@@ -93,83 +137,128 @@ async def test_transient_login_failure_during_a_poll_does_not_start_reauth(hass:
     assert entry.state is ConfigEntryState.LOADED
 
 
-async def test_user_flow_api_failure_shows_cannot_connect(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+@both_methods
+async def test_user_flow_api_failure_shows_cannot_connect(
+    hass: HomeAssistant, frigidaire_stub, method, tmp_path
+) -> None:
     hass.config.config_dir = str(tmp_path)
     stub = frigidaire_stub([LEGACY_AC])
     stub.error = frigidaire.FrigidaireException("Request failed", status_code=503)
 
-    result = await start_user_flow(hass)
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+    result = await submit_setup(hass, method)
 
     assert result["errors"] == {"base": "cannot_connect"}
 
 
-async def test_user_flow_without_appliances_shows_no_appliances(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+@both_methods
+async def test_user_flow_without_appliances_shows_no_appliances(
+    hass: HomeAssistant, frigidaire_stub, method, tmp_path
+) -> None:
     hass.config.config_dir = str(tmp_path)
     frigidaire_stub([])
 
-    result = await start_user_flow(hass)
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+    result = await submit_setup(hass, method)
 
     assert result["errors"] == {"base": "no_appliances"}
 
 
-async def test_user_flow_aborts_for_an_already_configured_account(hass: HomeAssistant, setup_entry) -> None:
+@both_methods
+async def test_user_flow_aborts_for_an_already_configured_account(hass: HomeAssistant, setup_entry, method) -> None:
     await setup_entry([LEGACY_AC])
 
-    result = await start_user_flow(hass)
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], CREDENTIALS)
+    result = await submit_setup(hass, method)
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "already_configured"
 
 
-async def test_rejected_credentials_during_a_poll_start_reauth(hass: HomeAssistant, setup_entry) -> None:
+@pytest.mark.parametrize(
+    "auth_method, existing, new", [("api_key", "password", "api_key"), ("password", "api_key", "password")]
+)
+async def test_the_same_account_cannot_be_added_with_the_other_method(
+    hass: HomeAssistant, add_entry, method_cases, frigidaire_stub, tmp_path, existing, new
+) -> None:
+    """Changing method means deleting the entry first; the abort message says so."""
+    hass.config.config_dir = str(tmp_path)
+    add_entry(data=method_cases[existing].entry_data)
+    frigidaire_stub([LEGACY_AC])
+
+    result = await submit_setup(hass, method_cases[new])
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "already_configured"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+@both_methods
+async def test_rejected_credentials_during_a_poll_start_reauth(hass: HomeAssistant, setup_entry, poll, method) -> None:
     entry, stub = await setup_entry([LEGACY_AC])
-    stub.error = frigidaire.AuthenticationError("Failed to authenticate")
 
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done(wait_background_tasks=True)
+    flow = await start_reauth(hass, stub, poll, method)
 
-    flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
-    assert len(flows) == 1
-    assert flows[0]["context"]["source"] == config_entries.SOURCE_REAUTH
-    assert flows[0]["context"]["entry_id"] == entry.entry_id
-    assert flows[0]["step_id"] == "reauth_confirm"
+    assert flow["context"]["source"] == config_entries.SOURCE_REAUTH
+    assert flow["context"]["entry_id"] == entry.entry_id
+    assert flow["step_id"] == "reauth_confirm"
 
 
-async def test_reauth_with_a_working_password_updates_and_reloads_the_entry(
-    hass: HomeAssistant, setup_entry, caplog: pytest.LogCaptureFixture
+@both_methods
+async def test_reauth_asks_for_the_entry_methods_credentials(hass: HomeAssistant, setup_entry, poll, method) -> None:
+    _entry, stub = await setup_entry([LEGACY_AC])
+    flow = await start_reauth(hass, stub, poll, method)
+
+    result = await hass.config_entries.flow.async_configure(flow["flow_id"])
+
+    assert result["step_id"] == "reauth_confirm"
+    assert [str(key) for key in result["data_schema"].schema] == list(method.reauth_input)
+    assert result["description_placeholders"]["username"] == "user@example.com"
+
+
+@both_methods
+async def test_reauth_with_working_credentials_updates_and_reloads_the_entry(
+    hass: HomeAssistant, setup_entry, poll, settle, method, caplog: pytest.LogCaptureFixture
 ) -> None:
     entry, stub = await setup_entry([LEGACY_AC])
-    stub.error = frigidaire.AuthenticationError("Failed to authenticate")
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done(wait_background_tasks=True)
-    flow = hass.config_entries.flow.async_progress_by_handler(DOMAIN)[0]
+    flow = await start_reauth(hass, stub, poll, method)
 
     stub.error = None
-    result = await hass.config_entries.flow.async_configure(flow["flow_id"], {"password": "new-secret"})
-    await hass.async_block_till_done(wait_background_tasks=True)
+    result = await hass.config_entries.flow.async_configure(flow["flow_id"], dict(method.reauth_input))
+    await settle()
 
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"
-    assert entry.data["password"] == "new-secret"
+    assert entry.data == {**method.entry_data, **method.reauth_input}
     assert entry.state is ConfigEntryState.LOADED
-    assert stub.password == "new-secret"
+    # The reloaded entry signed in with the new credentials.
+    assert stub.credentials == {**method.setup_input, **method.reauth_input}
     # Home Assistant 2026.12 stops reloading entries that also carry an update listener.
     assert "update listener" not in caplog.text
 
 
-async def test_reauth_with_a_wrong_password_shows_invalid_auth(hass: HomeAssistant, setup_entry) -> None:
+@both_methods
+async def test_reauth_with_wrong_credentials_shows_invalid_auth(hass: HomeAssistant, setup_entry, poll, method) -> None:
     entry, stub = await setup_entry([LEGACY_AC])
-    stub.error = frigidaire.AuthenticationError("Failed to authenticate")
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done(wait_background_tasks=True)
-    flow = hass.config_entries.flow.async_progress_by_handler(DOMAIN)[0]
+    flow = await start_reauth(hass, stub, poll, method)
 
-    result = await hass.config_entries.flow.async_configure(flow["flow_id"], {"password": "still-wrong"})
+    result = await hass.config_entries.flow.async_configure(flow["flow_id"], dict(method.reauth_input))
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "reauth_confirm"
     assert result["errors"] == {"base": "invalid_auth"}
-    assert entry.data["password"] == "secret"
+    assert entry.data == method.entry_data
+
+
+@both_methods
+async def test_reauth_with_another_accounts_credentials_aborts(
+    hass: HomeAssistant, setup_entry, poll, settle, method
+) -> None:
+    entry, stub = await setup_entry([LEGACY_AC])
+    flow = await start_reauth(hass, stub, poll, method)
+
+    stub.error = None
+    stub.email = "someone-else@example.com"
+    result = await hass.config_entries.flow.async_configure(flow["flow_id"], dict(method.reauth_input))
+    await settle()
+
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "wrong_account"
+    assert entry.data == method.entry_data

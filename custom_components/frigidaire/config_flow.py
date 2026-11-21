@@ -55,6 +55,18 @@ def _device_schema(current: dict, appliance: frigidaire.Appliance) -> vol.Schema
     return vol.Schema(fields)
 
 
+def _form_schema(flow: config_entries.ConfigFlow, schema: vol.Schema, typed: dict | None, data: dict) -> vol.Schema:
+    """The form to show again after a failed validation.
+
+    When validation changed what was typed, for example because it refreshed the API key
+    method's single-use tokens before failing later, the form keeps the changed values: retrying
+    with the typed refresh token would fail, since it is already spent.
+    """
+    if typed is None or all(data.get(key) == value for key, value in typed.items()):
+        return schema
+    return flow.add_suggested_values_to_schema(schema, {key: data[key] for key in typed if key in data})
+
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for frigidaire.
 
@@ -83,6 +95,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """One sign-in method's form: validate, refuse a configured account, then per-device options."""
         module = METHODS[method]
         errors: dict[str, str] = {}
+        data: dict[str, Any] = {}
 
         if user_input is not None:
             # The method may update this in place during validation, for example with rotated tokens.
@@ -106,7 +119,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._pending_appliances = list(appliances)
                     return await self._async_next_device_step()
 
-        return self.async_show_form(step_id=method, data_schema=module.SCHEMA, errors=errors)
+        return self.async_show_form(
+            step_id=method,
+            data_schema=_form_schema(self, module.SCHEMA, user_input, data),
+            description_placeholders=module.DESCRIPTION_PLACEHOLDERS,
+            errors=errors,
+        )
 
     async def _async_next_device_step(self) -> ConfigFlowResult:
         if not self._pending_appliances:
@@ -133,10 +151,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask again for the entry's own method's credentials and reload the entry with them."""
+        """Ask again for the entry's own method's credentials and reload the entry with them.
+
+        The method cannot change here: switching means deleting the entry and adding it again,
+        which the form's description says.
+        """
         entry = self._get_reauth_entry()
         module = METHODS[entry.data["auth_method"]]
         errors: dict[str, str] = {}
+        data: dict[str, Any] = {}
 
         if user_input is not None:
             data = {**entry.data, **user_input}
@@ -156,7 +179,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=module.REAUTH_SCHEMA,
+            data_schema=_form_schema(self, module.REAUTH_SCHEMA, user_input, data),
             description_placeholders={"username": entry.unique_id or entry.title},
             errors=errors,
         )

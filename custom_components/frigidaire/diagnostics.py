@@ -18,8 +18,14 @@ from .const import DOMAIN
 from .coordinator import FrigidaireConfigEntry
 
 TO_REDACT = {
+    # Credentials of either sign-in method.
     "username",
     "password",
+    "api_key",
+    "access_token",
+    "refresh_token",
+    # Identifiers in the records.
+    "serialNumber",
     "applianceId",
     "deviceId",
     "TimeZoneStandardName",
@@ -67,6 +73,9 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: Frigida
     coordinator = entry.runtime_data
     return {
         "entry": {"data": async_redact_data(dict(entry.data), TO_REDACT), "options": dict(entry.options)},
+        "auth_method": entry.data.get("auth_method"),
+        "live_updates": coordinator.client.supports_live_updates,
+        "stream_connected": coordinator.stream_connected,
         "last_update_success": coordinator.last_update_success,
         "appliances": [_describe(appliance) for appliance in (coordinator.data or {}).values()],
     }

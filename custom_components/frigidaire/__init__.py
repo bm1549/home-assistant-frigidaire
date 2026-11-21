@@ -25,17 +25,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: FrigidaireConfigEntry) -
     if (module := METHODS.get(method)) is None:
         raise ConfigEntryError(f"Unknown sign-in method {method!r}; delete this entry and add it again")
 
-    client = frigidaire.Frigidaire(module.create_backend(hass, entry))
+    client: frigidaire.Frigidaire | None = None
     try:
+        client = frigidaire.Frigidaire(module.create_backend(hass, entry))
         await client.connect()
     except frigidaire.AuthenticationError as err:
-        await client.close()
+        if client is not None:
+            await client.close()
         raise ConfigEntryAuthFailed(str(err)) from err
     except frigidaire.FrigidaireException as err:
-        await client.close()
-        raise ConfigEntryNotReady(describe_error(err)) from err
+        if client is not None:
+            await client.close()
+        raise ConfigEntryNotReady(describe_error(err, module.RATE_LIMIT_ERRORS)) from err
 
-    coordinator = FrigidaireCoordinator(hass, entry, client)
+    coordinator = FrigidaireCoordinator(hass, entry, client, module)
     try:
         await coordinator.async_config_entry_first_refresh()
     except ConfigEntryNotReady as err:
@@ -47,6 +50,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: FrigidaireConfigEntry) -
         raise
     entry.runtime_data = coordinator
     entry.async_on_unload(client.close)
+    if client.supports_live_updates:
+        coordinator.async_start_live_updates()
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True

@@ -1,5 +1,9 @@
 """Diagnostics downloads carry the raw records with personal fields redacted."""
 
+import copy
+import json
+
+import pytest
 from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -22,6 +26,9 @@ async def test_config_entry_diagnostics(hass: HomeAssistant, hass_client: Client
         "username": "**REDACTED**",
         "password": "**REDACTED**",
     }
+    assert diagnostics["auth_method"] == "password"
+    assert diagnostics["live_updates"] is False
+    assert diagnostics["stream_connected"] is False
     records = {a["raw"]["applianceData"]["applianceName"]: a for a in diagnostics["appliances"]}
     assert records["Bedroom AC"]["raw"]["applianceId"] == "**REDACTED**"
     assert records["Bedroom AC"]["raw"]["properties"]["reported"]["mode"] == "COOL"
@@ -43,3 +50,53 @@ async def test_device_diagnostics_returns_only_that_appliance(
     assert diagnostics["raw"]["applianceData"]["applianceName"] == "Basement Dehumidifier"
     assert diagnostics["raw"]["applianceId"] == "**REDACTED**"
     assert diagnostics["parsed"]["target_humidity"] == 45
+
+
+# An API key record, which carries the appliance info the official API returns.
+API_KEY_AC = copy.deepcopy(LEGACY_AC)
+API_KEY_AC["applianceData"]["applianceInfo"] = {
+    "serialNumber": "SN-12345",
+    "pnc": "950011234",
+    "brand": "FRIGIDAIRE",
+    "deviceType": "AIR_CONDITIONER",
+    "model": "FHWW083WA1",
+    "variant": "1",
+    "colour": "WHITE",
+}
+
+
+@pytest.mark.parametrize("auth_method", ["api_key"])
+async def test_api_key_entry_diagnostics_redact_the_key_tokens_and_serial(
+    hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry
+) -> None:
+    entry, stub = await setup_entry([API_KEY_AC])
+
+    diagnostics = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+
+    assert diagnostics["entry"]["data"] == {
+        "auth_method": "api_key",
+        "api_key": "**REDACTED**",
+        "access_token": "**REDACTED**",
+        "refresh_token": "**REDACTED**",
+    }
+    assert diagnostics["auth_method"] == "api_key"
+    assert diagnostics["live_updates"] is True
+    assert diagnostics["stream_connected"] is True
+    info = diagnostics["appliances"][0]["raw"]["applianceData"]["applianceInfo"]
+    assert info["serialNumber"] == "**REDACTED**"
+    assert info["model"] == "FHWW083WA1"
+    dumped = json.dumps(diagnostics)
+    for secret in ("the-api-key", "access-1", "refresh-1", "SN-12345"):
+        assert secret not in dumped
+
+
+@pytest.mark.parametrize("auth_method", ["api_key"])
+async def test_diagnostics_report_a_dropped_stream(
+    hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry
+) -> None:
+    entry, stub = await setup_entry([LEGACY_AC])
+    entry.runtime_data._handle_stream_disconnect()
+
+    diagnostics = await get_diagnostics_for_config_entry(hass, hass_client, entry)
+
+    assert diagnostics["stream_connected"] is False

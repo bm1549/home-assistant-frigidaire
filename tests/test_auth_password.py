@@ -1,6 +1,7 @@
 """The email-and-password sign-in module: its session files and validation."""
 
 import json
+from datetime import timedelta
 from unittest.mock import patch
 
 import frigidaire
@@ -28,10 +29,12 @@ def store_for_entry(hass: HomeAssistant, entry) -> frigidaire.SessionStore:
 
 
 def test_password_is_the_first_menu_entry() -> None:
-    assert list(METHODS) == ["password"]
+    assert list(METHODS)[0] == "password"
     assert METHODS["password"] is password
     assert password.METHOD == "password"
     assert password.BETA is False
+    assert password.RESYNC_INTERVAL == timedelta(seconds=30)
+    assert password.RATE_LIMIT_ERRORS == (frigidaire.SessionCapError,)
 
 
 async def test_validation_logs_in_fresh_and_saves_the_session_for_setup(

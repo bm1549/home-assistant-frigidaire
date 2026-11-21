@@ -1,8 +1,10 @@
 """Config-entry setup and teardown against a fake client."""
 
 import os
+from unittest.mock import patch
 
 import frigidaire
+import pytest
 from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC, with_reported
 from homeassistant.config_entries import SOURCE_REAUTH, ConfigEntryState
 from homeassistant.core import HomeAssistant
@@ -18,6 +20,8 @@ def entity_id_for(hass: HomeAssistant, domain: str, unique_id: str) -> str | Non
 
 CREDENTIALS = {"username": "user@example.com", "password": "secret"}
 
+both_methods = pytest.mark.parametrize("auth_method", ["password", "api_key"])
+
 
 def make_entry(hass: HomeAssistant, *, minor_version: int = 2, data: dict | None = None, **kwargs) -> MockConfigEntry:
     entry = MockConfigEntry(
@@ -32,6 +36,7 @@ def make_entry(hass: HomeAssistant, *, minor_version: int = 2, data: dict | None
     return entry
 
 
+@both_methods
 async def test_setup_creates_expected_entities_for_each_appliance(hass: HomeAssistant, setup_entry) -> None:
     entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
 
@@ -58,12 +63,13 @@ async def test_dehumidifier_reporting_temperature_gets_temperature_sensor(hass: 
     assert hass.states.get(sensor_id).state == "68"
 
 
-async def test_unload_entry_cleans_up(hass: HomeAssistant, setup_entry) -> None:
+@both_methods
+async def test_unload_entry_cleans_up(hass: HomeAssistant, setup_entry, settle) -> None:
     entry, _stub = await setup_entry([LEGACY_AC])
     assert entry.state is ConfigEntryState.LOADED
 
     assert await hass.config_entries.async_unload(entry.entry_id)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
 
     assert entry.state is ConfigEntryState.NOT_LOADED
 
@@ -87,11 +93,14 @@ async def test_session_cap_during_setup_reports_rate_limit(hass: HomeAssistant, 
     assert entry.reason == "Rate limited by Frigidaire (status=429, error=cas_3403); will retry automatically"
 
 
-async def test_other_api_failure_during_setup_reports_status(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+@both_methods
+async def test_other_api_failure_during_setup_reports_status(
+    hass: HomeAssistant, frigidaire_stub, add_entry, method, tmp_path
+) -> None:
     hass.config.config_dir = str(tmp_path)
     stub = frigidaire_stub([LEGACY_AC])
     stub.error = frigidaire.FrigidaireException("Request failed", status_code=503)
-    entry = make_entry(hass)
+    entry = add_entry(data=method.entry_data)
 
     assert not await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
@@ -100,11 +109,14 @@ async def test_other_api_failure_during_setup_reports_status(hass: HomeAssistant
     assert entry.reason == "Error communicating with Frigidaire (status=503): Request failed"
 
 
-async def test_rejected_credentials_during_setup_start_reauth(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+@both_methods
+async def test_rejected_credentials_during_setup_start_reauth(
+    hass: HomeAssistant, frigidaire_stub, add_entry, method, tmp_path
+) -> None:
     hass.config.config_dir = str(tmp_path)
     stub = frigidaire_stub([LEGACY_AC])
-    stub.error = frigidaire.AuthenticationError("Failed to authenticate")
-    entry = make_entry(hass)
+    stub.error = method.auth_error()
+    entry = add_entry(data=method.entry_data)
 
     assert not await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done(wait_background_tasks=True)
@@ -208,6 +220,7 @@ async def test_unknown_sign_in_method_fails_setup(hass: HomeAssistant, frigidair
     assert stub.connect_count == 0
 
 
+@both_methods
 async def test_unload_closes_the_backend(hass: HomeAssistant, setup_entry) -> None:
     entry, stub = await setup_entry([LEGACY_AC])
     assert not stub.closed
@@ -226,3 +239,16 @@ async def test_removing_the_entry_deletes_its_session_file(hass: HomeAssistant, 
     await hass.async_block_till_done(wait_background_tasks=True)
 
     assert not os.path.exists(session_file)
+
+
+@both_methods
+async def test_removing_the_entry_calls_its_methods_cleanup(hass: HomeAssistant, setup_entry, settle, method) -> None:
+    entry, _stub = await setup_entry([LEGACY_AC])
+
+    with patch(f"custom_components.frigidaire.auth.{method.name}.async_remove") as remove:
+        await hass.config_entries.async_remove(entry.entry_id)
+        await settle()
+
+    remove.assert_awaited_once()
+    assert remove.await_args.args[1].entry_id == entry.entry_id
+    assert hass.config_entries.async_entries(DOMAIN) == []

@@ -29,6 +29,9 @@ BETA = False
 RESYNC_INTERVAL = timedelta(seconds=30)
 SCHEMA = vol.Schema({"username": str, "password": str})
 REAUTH_SCHEMA = vol.Schema({vol.Required("password"): str})
+DESCRIPTION_PLACEHOLDERS: dict[str, str] = {}
+# Frigidaire's active-session cap: a rate limit to wait out, never a reason to log in again.
+RATE_LIMIT_ERRORS: tuple[type[frigidaire.FrigidaireException], ...] = (frigidaire.SessionCapError,)
 
 LEGACY_SESSION_FILE = "frigidaire.json"
 TIMEOUT = 60  # seconds
