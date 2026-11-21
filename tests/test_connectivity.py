@@ -1,14 +1,11 @@
 """Connectivity binary sensor derived from the appliance record's connectionState."""
 
 import copy
-from datetime import timedelta
 
 import frigidaire
 from frigidaire.testing import LEGACY_AC
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 
 def connectivity_id(hass: HomeAssistant) -> str:
@@ -41,11 +38,10 @@ async def test_record_without_connection_state_creates_no_sensor(hass: HomeAssis
     assert er.async_get(hass).async_get_entity_id("binary_sensor", "frigidaire", "AC-LEGACY-1_connectivity") is None
 
 
-async def test_failed_poll_makes_connectivity_unavailable(hass: HomeAssistant, setup_entry) -> None:
+async def test_failed_poll_makes_connectivity_unavailable(hass: HomeAssistant, setup_entry, poll) -> None:
     _entry, stub = await setup_entry([LEGACY_AC])
     stub.error = frigidaire.FrigidaireException("Request failed", status_code=503)
 
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll()
 
     assert hass.states.get(connectivity_id(hass)).state == "unavailable"

@@ -1,14 +1,10 @@
 """Climate entity behaviour for air conditioners."""
 
-from datetime import timedelta
-
 import frigidaire
 import pytest
 from frigidaire.testing import LEGACY_AC, TELICA_AC, with_reported
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 OFF_AC = with_reported(LEGACY_AC, applianceState="OFF", mode="OFF")
 
@@ -19,11 +15,11 @@ def climate_id(hass: HomeAssistant) -> str:
     return entity_id
 
 
-async def set_hvac_mode(hass: HomeAssistant, entity_id: str, hvac_mode: str) -> None:
+async def set_hvac_mode(hass: HomeAssistant, entity_id: str, hvac_mode: str, settle) -> None:
     await hass.services.async_call(
         "climate", "set_hvac_mode", {"entity_id": entity_id, "hvac_mode": hvac_mode}, blocking=True
     )
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
 
 
 async def test_running_cool_unit_reports_cool_and_cooling(hass: HomeAssistant, setup_entry) -> None:
@@ -47,20 +43,22 @@ async def test_powered_off_unit_reports_off(hass: HomeAssistant, setup_entry) ->
     assert state.attributes["hvac_action"] == "off"
 
 
-async def test_set_hvac_mode_on_running_unit_always_sends_power_then_mode(hass: HomeAssistant, setup_entry) -> None:
+async def test_set_hvac_mode_on_running_unit_always_sends_power_then_mode(
+    hass: HomeAssistant, setup_entry, settle
+) -> None:
     """The cloud reports desired state, so RUNNING may be stale; power-on must not be skipped."""
     _entry, stub = await setup_entry([LEGACY_AC])
 
-    await set_hvac_mode(hass, climate_id(hass), "fan_only")
+    await set_hvac_mode(hass, climate_id(hass), "fan_only", settle)
 
     assert stub.commands == [("executeCommand", frigidaire.Power.ON), ("mode", frigidaire.Mode.FAN)]
 
 
-async def test_set_hvac_mode_from_off_sends_power_mode_then_setpoint(hass: HomeAssistant, setup_entry) -> None:
+async def test_set_hvac_mode_from_off_sends_power_mode_then_setpoint(hass: HomeAssistant, setup_entry, settle) -> None:
     """The setpoint goes last: engaging the mode restores the appliance default and wipes an earlier value."""
     _entry, stub = await setup_entry([OFF_AC])
 
-    await set_hvac_mode(hass, climate_id(hass), "cool")
+    await set_hvac_mode(hass, climate_id(hass), "cool", settle)
 
     assert stub.commands == [
         ("executeCommand", frigidaire.Power.ON),
@@ -70,22 +68,23 @@ async def test_set_hvac_mode_from_off_sends_power_mode_then_setpoint(hass: HomeA
     ]
 
 
-async def test_turn_off_sends_mode_off(hass: HomeAssistant, setup_entry) -> None:
+async def test_turn_off_sends_mode_off(hass: HomeAssistant, setup_entry, settle) -> None:
     _entry, stub = await setup_entry([LEGACY_AC])
 
-    await set_hvac_mode(hass, climate_id(hass), "off")
+    await set_hvac_mode(hass, climate_id(hass), "off", settle)
 
     assert stub.commands == [("mode", frigidaire.Mode.OFF)]
 
 
+# The session cap is the password method's.
+@pytest.mark.parametrize("auth_method", ["password"])
 async def test_failed_poll_marks_climate_unavailable_and_logs(
-    hass: HomeAssistant, setup_entry, caplog: pytest.LogCaptureFixture
+    hass: HomeAssistant, setup_entry, caplog: pytest.LogCaptureFixture, poll
 ) -> None:
     _entry, stub = await setup_entry([LEGACY_AC])
     stub.error = frigidaire.SessionCapError("Request failed", status_code=429, error_code="cas_3403")
 
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll()
 
     assert hass.states.get(climate_id(hass)).state == "unavailable"
     assert "Rate limited by Frigidaire (status=429, error=cas_3403)" in caplog.text

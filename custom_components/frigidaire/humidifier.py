@@ -37,7 +37,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up frigidaire from a config entry."""
     platform = entity_platform.async_get_current_platform()
-    platform.async_register_entity_service("set_fan_mode", {vol.Required("fan_mode"): cv.string}, "set_fan_mode")
+    platform.async_register_entity_service("set_fan_mode", {vol.Required("fan_mode"): cv.string}, "async_set_fan_mode")
 
     async_add_appliance_entities(
         entry.runtime_data,
@@ -136,26 +136,21 @@ class FrigidaireDehumidifier(FrigidaireEntity, HumidifierEntity):
             attributes["active_alerts"] = appliance.alerts
         return attributes
 
-    def turn_on(self, **kwargs: Any) -> None:
-        self.client.set_power(self.appliance, True)
-        self.refresh()
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.async_command(self.client.set_power(self.appliance, True))
 
-    def turn_off(self, **kwargs: Any) -> None:
-        self.client.set_power(self.appliance, False)
-        self.refresh()
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.async_command(self.client.set_power(self.appliance, False))
 
-    def set_humidity(self, humidity: int) -> None:
-        self.client.set_humidity(self.appliance, humidity)
-        self.refresh()
+    async def async_set_humidity(self, humidity: int) -> None:
+        await self.async_command(self.client.set_humidity(self.appliance, humidity))
 
-    def set_fan_mode(self, fan_mode: str) -> None:
+    async def async_set_fan_mode(self, fan_mode: str) -> None:
         if (fan_speed := HA_TO_FRIGIDAIRE_FAN_MODE.get(fan_mode)) is None:
             return
-        self.client.set_fan_speed(self.appliance, fan_speed)
-        self.refresh()
+        await self.async_command(self.client.set_fan_speed(self.appliance, fan_speed))
 
-    def set_mode(self, mode: str) -> None:
+    async def async_set_mode(self, mode: str) -> None:
         if (frigidaire_mode := HA_TO_FRIGIDAIRE_MODE.get(mode)) is None:
             return
-        self.client.set_mode(self.appliance, frigidaire_mode)
-        self.refresh()
+        await self.async_command(self.client.set_mode(self.appliance, frigidaire_mode))

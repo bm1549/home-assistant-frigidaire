@@ -6,7 +6,7 @@ from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.helpers import entity_registry as er
 
 
-async def test_enabling_check_filter_creates_binary_sensor(hass: HomeAssistant, setup_entry) -> None:
+async def test_enabling_check_filter_creates_binary_sensor(hass: HomeAssistant, setup_entry, settle) -> None:
     entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
     registry = er.async_get(hass)
     assert registry.async_get_entity_id("binary_sensor", "frigidaire", "DH-1_check_filter") is None
@@ -24,7 +24,7 @@ async def test_enabling_check_filter_creates_binary_sensor(hass: HomeAssistant, 
     # Second device (the dehumidifier): enable the filter sensor.
     result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={"check_filter": True})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
 
     assert entry.options["DH-1"]["check_filter"] is True
     assert entry.options["AC-LEGACY-1"]["check_filter"] is False
@@ -34,7 +34,7 @@ async def test_enabling_check_filter_creates_binary_sensor(hass: HomeAssistant, 
 
 
 async def test_air_conditioner_options_include_compressor_fields_and_serialize(
-    hass: HomeAssistant, setup_entry
+    hass: HomeAssistant, setup_entry, settle
 ) -> None:
     from homeassistant.helpers import config_validation as cv
     from probatio import to_field_list
@@ -57,6 +57,6 @@ async def test_air_conditioner_options_include_compressor_fields_and_serialize(
 
     result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
     assert entry.options["AC-LEGACY-1"]["cool_hysteresis"] == 1.5
     assert entry.options["AC-LEGACY-1"]["compressor_off_delay"] == 60

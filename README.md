@@ -113,7 +113,7 @@ cannot override the Frigidaire climate entity's own `hvac_action` property.
 2. Go to **Integrations** and search for **Frigidaire**.
 3. Click **Download** and restart Home Assistant.
 4. Go to **Settings → Devices & Services → Add Integration** and search for **Frigidaire**.
-5. Enter your Frigidaire account email and password.
+5. Choose **Email and password** and enter your Frigidaire account email and password.
 
 ### Manual
 
@@ -121,7 +121,7 @@ cannot override the Frigidaire climate entity's own `hvac_action` property.
 2. Copy the `custom_components/frigidaire/` folder into `/config/custom_components/frigidaire/` on your HA instance.
 3. Restart Home Assistant.
 4. Go to **Settings → Devices & Services → Add Integration** and search for **Frigidaire**.
-5. Enter your Frigidaire account email and password.
+5. Choose **Email and password** and enter your Frigidaire account email and password.
 
 Appliances added to your Frigidaire account appear on the next poll without a reload.
 

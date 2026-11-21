@@ -2,6 +2,7 @@
 
 import json
 
+import pytest
 from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -11,15 +12,23 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
 )
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
+from custom_components.frigidaire.auth import METHODS
+
 DOMAIN = "frigidaire"
 
 
-async def test_config_entry_diagnostics(hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry) -> None:
+@pytest.mark.parametrize("auth_method", list(METHODS))
+async def test_config_entry_diagnostics(
+    hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry, method
+) -> None:
     entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
 
     diagnostics = await get_diagnostics_for_config_entry(hass, hass_client, entry)
 
-    assert diagnostics["entry"]["data"] == {"username": "**REDACTED**", "password": "**REDACTED**"}
+    assert diagnostics["entry"]["data"] == {
+        "auth_method": method.name,
+        **{key: "**REDACTED**" for key in method.setup_input},
+    }
     records = {a["raw"]["applianceData"]["applianceName"]: a for a in diagnostics["appliances"]}
     assert records["Bedroom AC"]["raw"]["applianceId"] == "**REDACTED**"
     assert records["Bedroom AC"]["raw"]["properties"]["reported"]["mode"] == "COOL"
