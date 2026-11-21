@@ -116,7 +116,9 @@ async def test_appliance_missing_from_the_account_goes_unavailable(
     assert state_of(hass, "climate", "AC-TELICA-1") == "unavailable"
     assert state_of(hass, "climate", "AC-LEGACY-1") == "cool"
     assert state_of(hass, "humidifier", "DH-1") == "on"
-    assert "Office AC (AC-TELICA-1) is no longer on the account" in caplog.text
+    # A backend may skip an appliance it could not read this time, so the log does not say it was removed.
+    assert "Office AC (AC-TELICA-1) was not in the latest fetch" in caplog.text
+    assert "no longer on the account" not in caplog.text
 
 
 async def test_appliance_returning_to_the_account_recovers(hass: HomeAssistant, setup_entry, poll) -> None:

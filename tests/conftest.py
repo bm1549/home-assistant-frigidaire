@@ -28,6 +28,7 @@ from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from custom_components.frigidaire.auth import METHODS
+from custom_components.frigidaire.coordinator import STREAM_TASK_NAME
 
 DOMAIN = "frigidaire"
 
@@ -89,6 +90,53 @@ def _install_password(build: MagicMock, records: list[dict]) -> FakeBackend:
     return stub
 
 
+class FakeApiKeyBackend(FakeBackend):
+    """``FakeBackend`` with the ``ApiKeyBackend``'s live updates and token behaviour.
+
+    ``tokens`` is the pair in use; ``rotate`` replaces it and hands it to the ``on_tokens`` callback,
+    as a refresh does. ``rotate_on_connect`` makes the next ``connect`` rotate to that pair, as when
+    the typed access token was near expiry. ``listen_error``, when set, is raised by ``listen``.
+    """
+
+    def __init__(self, records: list[dict]) -> None:
+        super().__init__(records, supports_live_updates=True)
+        self.tokens: tuple[str, str] = ("", "")
+        self.on_tokens: Callable[[str, str], None] | None = None
+        self.rotate_on_connect: tuple[str, str] | None = None
+        self.listen_error: Exception | None = None
+
+    def rotate(self, access_token: str, refresh_token: str) -> None:
+        self.tokens = (access_token, refresh_token)
+        if self.on_tokens is not None:
+            self.on_tokens(access_token, refresh_token)
+
+    async def connect(self) -> None:
+        if self.rotate_on_connect is not None:
+            pair, self.rotate_on_connect = self.rotate_on_connect, None
+            self.rotate(*pair)
+        await super().connect()
+
+    async def listen(self, on_record, on_connect, on_disconnect) -> None:
+        if self.listen_error is not None:
+            raise self.listen_error
+        await super().listen(on_record, on_connect, on_disconnect)
+
+
+def _install_api_key(build: MagicMock, records: list[dict]) -> FakeBackend:
+    """A ``FakeApiKeyBackend`` whose ``tokens`` start as the pair it was built with and whose
+    ``on_tokens`` is the callback it got, so token saving runs as with the real backend."""
+    stub = FakeApiKeyBackend(records)
+
+    def construct(api_key: str, access_token: str, refresh_token: str, on_tokens) -> FakeBackend:
+        stub.credentials = {"api_key": api_key, "access_token": access_token, "refresh_token": refresh_token}
+        stub.tokens = (access_token, refresh_token)
+        stub.on_tokens = on_tokens
+        return stub
+
+    build.side_effect = construct
+    return stub
+
+
 _CASES: dict[str, MethodCase] = {
     "password": MethodCase(
         name="password",
@@ -99,6 +147,15 @@ _CASES: dict[str, MethodCase] = {
         resync=timedelta(seconds=30),
         auth_error=lambda: frigidaire.AuthenticationError("Failed to authenticate"),
     ),
+    "api_key": MethodCase(
+        name="api_key",
+        build_backend="custom_components.frigidaire.auth.api_key.build_backend",
+        install=_install_api_key,
+        setup_input={"api_key": "the-api-key", "access_token": "access-1", "refresh_token": "refresh-1"},
+        reauth_input={"api_key": "new-api-key", "access_token": "access-2", "refresh_token": "refresh-2"},
+        resync=timedelta(minutes=5),
+        auth_error=lambda: frigidaire.AuthenticationError("Rejected", status_code=401),
+    ),
 }
 # Only the methods the integration has: deleting a method's module drops its case here too.
 METHOD_CASES: dict[str, MethodCase] = {name: case for name, case in _CASES.items() if name in METHODS}
@@ -106,8 +163,8 @@ METHOD_CASES: dict[str, MethodCase] = {name: case for name, case in _CASES.items
 DEFAULT_METHOD = next(iter(METHOD_CASES))
 
 # Names of entry background tasks that run for the life of the entry, which ``settle`` must not
-# wait for. No sign-in method has one yet.
-LONG_RUNNING_TASKS: frozenset[str] = frozenset()
+# wait for: the live update stream of methods that have one.
+LONG_RUNNING_TASKS: frozenset[str] = frozenset({STREAM_TASK_NAME})
 
 
 @pytest.fixture

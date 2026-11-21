@@ -143,7 +143,7 @@ class FrigidaireDehumidifier(FrigidaireEntity, HumidifierEntity):
         await self.async_command(self.client.set_power(self.appliance, False))
 
     async def async_set_humidity(self, humidity: int) -> None:
-        await self.async_command(self.client.set_humidity(self.appliance, humidity))
+        await self.async_command(self.client.set_humidity(self.appliance, humidity), rejected="humidity_rejected")
 
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         if (fan_speed := HA_TO_FRIGIDAIRE_FAN_MODE.get(fan_mode)) is None:

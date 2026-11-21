@@ -13,7 +13,7 @@ from homeassistant.config_entries import ConfigFlowResult
 import frigidaire
 
 from .auth import METHODS
-from .auth.errors import CannotConnect, InvalidAuth
+from .auth.errors import CannotConnect, CredentialsInUse, InvalidAuth
 from .const import (
     BINARY_SENSOR_OPTIONS,
     CONF_COMPRESSOR_ESTIMATE,
@@ -55,6 +55,18 @@ def _device_schema(current: dict, appliance: frigidaire.Appliance) -> vol.Schema
     return vol.Schema(fields)
 
 
+def _form_schema(flow: config_entries.ConfigFlow, schema: vol.Schema, typed: dict | None, data: dict) -> vol.Schema:
+    """The form to show again after a failed validation.
+
+    When validation changed what was typed, for example because it refreshed the API key
+    method's single-use tokens before failing later, the form keeps the changed values: retrying
+    with the typed refresh token would fail, since it is already spent.
+    """
+    if typed is None or all(data.get(key) == value for key, value in typed.items()):
+        return schema
+    return flow.add_suggested_values_to_schema(schema, {key: data[key] for key in typed if key in data})
+
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for frigidaire.
 
@@ -83,12 +95,15 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """One sign-in method's form: validate, refuse a configured account, then per-device options."""
         module = METHODS[method]
         errors: dict[str, str] = {}
+        data: dict[str, Any] = {}
 
         if user_input is not None:
-            # The method may update this in place during validation.
+            # The method may update this in place during validation, for example with rotated tokens.
             data = dict(user_input)
             try:
                 email, appliances = await module.async_validate(self.hass, data)
+            except CredentialsInUse:
+                errors["base"] = "credentials_in_use"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except InvalidAuth:
@@ -108,7 +123,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id=method,
-            data_schema=module.SCHEMA,
+            data_schema=_form_schema(self, module.SCHEMA, user_input, data),
             description_placeholders=module.DESCRIPTION_PLACEHOLDERS,
             errors=errors,
         )
@@ -140,16 +155,20 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Ask again for the entry's own method's credentials and reload the entry with them.
 
-        The method cannot change here: switching means deleting the entry and adding it again.
+        The method cannot change here: switching means deleting the entry and adding it again,
+        which the form's description says.
         """
         entry = self._get_reauth_entry()
         module = METHODS[entry.data["auth_method"]]
         errors: dict[str, str] = {}
+        data: dict[str, Any] = {}
 
         if user_input is not None:
             data = {**entry.data, **user_input}
             try:
                 email, _appliances = await module.async_validate(self.hass, data, entry)
+            except CredentialsInUse:
+                errors["base"] = "credentials_in_use"
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
             except CannotConnect:
@@ -164,7 +183,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=module.REAUTH_SCHEMA,
+            data_schema=_form_schema(self, module.REAUTH_SCHEMA, user_input, data),
             description_placeholders=module.reauth_description_placeholders(entry),
             errors=errors,
         )
