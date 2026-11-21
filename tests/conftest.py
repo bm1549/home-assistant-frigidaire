@@ -4,9 +4,10 @@ Integration tests use the `hass` fixture from pytest-homeassistant-custom-compon
 sign-in method's backend replaced by the library's own `FakeBackend`, so nothing touches the
 network and the real facade, command sequences and parsing still run.
 
-Tests use the password method unless they parametrize `auth_method`, for example
-`@pytest.mark.parametrize("auth_method", ["password", "api_key"])`; the `method` fixture then
-says how to drive that method (what to type, its resync interval, a definite auth error).
+Tests use the first sign-in method in the menu (password) unless they parametrize `auth_method`,
+for example `@pytest.mark.parametrize("auth_method", ["password", "api_key"])`; the `method`
+fixture then says how to drive that method (what to type, its resync interval, a definite auth
+error). A test that only makes sense for one method says so the same way, with that one method.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.unit_system import US_CUSTOMARY_SYSTEM
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
+from custom_components.frigidaire.auth import METHODS
 from custom_components.frigidaire.coordinator import STREAM_TASK_NAME
 
 DOMAIN = "frigidaire"
@@ -64,7 +66,7 @@ class MethodCase:
         return {"auth_method": self.name, **self.setup_input}
 
 
-METHOD_CASES: dict[str, MethodCase] = {
+_CASES: dict[str, MethodCase] = {
     "password": MethodCase(
         name="password",
         build_backend="custom_components.frigidaire.auth.password.build_backend",
@@ -79,16 +81,13 @@ METHOD_CASES: dict[str, MethodCase] = {
         setup_input={"api_key": "the-api-key", "access_token": "access-1", "refresh_token": "refresh-1"},
         reauth_input={"api_key": "new-api-key", "access_token": "access-2", "refresh_token": "refresh-2"},
         resync=timedelta(minutes=5),
-        # With an HTTP status, the server rejected the credentials: reauth starts at once.
         auth_error=lambda: frigidaire.AuthenticationError("Rejected", status_code=401),
     ),
 }
-# The method every test uses unless it parametrizes ``auth_method``.
-DEFAULT_METHOD = "password"
-
-# Kept for tests written against the password method.
-BUILD_BACKEND = METHOD_CASES["password"].build_backend
-ENTRY_DATA = METHOD_CASES["password"].entry_data
+# Only the methods the integration has: deleting a method's module drops its case here too.
+METHOD_CASES: dict[str, MethodCase] = {name: case for name, case in _CASES.items() if name in METHODS}
+# The method every test uses unless it parametrizes ``auth_method``: the first in the setup menu.
+DEFAULT_METHOD = next(iter(METHOD_CASES))
 
 
 class FakeApiKeyBackend(FakeBackend):
@@ -197,12 +196,12 @@ def frigidaire_stub(method: MethodCase):
 
 
 def make_entry(hass: HomeAssistant, *, options: dict | None = None, data: dict | None = None) -> MockConfigEntry:
-    """A current-version entry for user@example.com (password unless ``data`` says otherwise), not set up."""
+    """A current-version entry for user@example.com, not set up; ``DEFAULT_METHOD``'s unless ``data`` says otherwise."""
     entry = MockConfigEntry(
         domain=DOMAIN,
         version=1,
         minor_version=2,
-        data=dict(ENTRY_DATA if data is None else data),
+        data=dict(METHOD_CASES[DEFAULT_METHOD].entry_data if data is None else data),
         options=options or {},
         unique_id="user@example.com",
     )

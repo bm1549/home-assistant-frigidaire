@@ -11,6 +11,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.frigidaire.auth import METHODS
+
 DOMAIN = "frigidaire"
 
 
@@ -20,7 +22,7 @@ def entity_id_for(hass: HomeAssistant, domain: str, unique_id: str) -> str | Non
 
 CREDENTIALS = {"username": "user@example.com", "password": "secret"}
 
-both_methods = pytest.mark.parametrize("auth_method", ["password", "api_key"])
+every_method = pytest.mark.parametrize("auth_method", list(METHODS))
 
 
 def make_entry(hass: HomeAssistant, *, minor_version: int = 2, data: dict | None = None, **kwargs) -> MockConfigEntry:
@@ -36,7 +38,7 @@ def make_entry(hass: HomeAssistant, *, minor_version: int = 2, data: dict | None
     return entry
 
 
-@both_methods
+@every_method
 async def test_setup_creates_expected_entities_for_each_appliance(hass: HomeAssistant, setup_entry) -> None:
     entry, _stub = await setup_entry([LEGACY_AC, DEHUMIDIFIER])
 
@@ -63,7 +65,7 @@ async def test_dehumidifier_reporting_temperature_gets_temperature_sensor(hass: 
     assert hass.states.get(sensor_id).state == "68"
 
 
-@both_methods
+@every_method
 async def test_unload_entry_cleans_up(hass: HomeAssistant, setup_entry, settle) -> None:
     entry, _stub = await setup_entry([LEGACY_AC])
     assert entry.state is ConfigEntryState.LOADED
@@ -74,28 +76,33 @@ async def test_unload_entry_cleans_up(hass: HomeAssistant, setup_entry, settle) 
     assert entry.state is ConfigEntryState.NOT_LOADED
 
 
+# Session files, the session cap and the legacy migration are the password method's.
+@pytest.mark.parametrize("auth_method", ["password"])
 async def test_session_is_persisted_per_entry(hass: HomeAssistant, setup_entry, tmp_path) -> None:
     entry, _stub = await setup_entry([LEGACY_AC])
 
     assert os.path.exists(tmp_path / f"frigidaire-{entry.entry_id}.json")
 
 
-async def test_session_cap_during_setup_reports_rate_limit(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+@pytest.mark.parametrize("auth_method", ["password"])
+async def test_session_cap_during_setup_reports_rate_limit(
+    hass: HomeAssistant, frigidaire_stub, tmp_path, settle
+) -> None:
     hass.config.config_dir = str(tmp_path)
     stub = frigidaire_stub([LEGACY_AC])
     stub.error = frigidaire.SessionCapError("Request failed", status_code=429, error_code="cas_3403")
     entry = make_entry(hass)
 
     assert not await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
 
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert entry.reason == "Rate limited by Frigidaire (status=429, error=cas_3403); will retry automatically"
 
 
-@both_methods
+@every_method
 async def test_other_api_failure_during_setup_reports_status(
-    hass: HomeAssistant, frigidaire_stub, add_entry, method, tmp_path
+    hass: HomeAssistant, frigidaire_stub, add_entry, method, tmp_path, settle
 ) -> None:
     hass.config.config_dir = str(tmp_path)
     stub = frigidaire_stub([LEGACY_AC])
@@ -103,15 +110,15 @@ async def test_other_api_failure_during_setup_reports_status(
     entry = add_entry(data=method.entry_data)
 
     assert not await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
 
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert entry.reason == "Error communicating with Frigidaire (status=503): Request failed"
 
 
-@both_methods
+@every_method
 async def test_rejected_credentials_during_setup_start_reauth(
-    hass: HomeAssistant, frigidaire_stub, add_entry, method, tmp_path
+    hass: HomeAssistant, frigidaire_stub, add_entry, method, tmp_path, settle
 ) -> None:
     hass.config.config_dir = str(tmp_path)
     stub = frigidaire_stub([LEGACY_AC])
@@ -119,20 +126,22 @@ async def test_rejected_credentials_during_setup_start_reauth(
     entry = add_entry(data=method.entry_data)
 
     assert not await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
 
     assert entry.state is ConfigEntryState.SETUP_ERROR
     flows = hass.config_entries.flow.async_progress_by_handler(DOMAIN)
     assert [flow["context"]["source"] for flow in flows] == [SOURCE_REAUTH]
 
 
-async def test_record_without_properties_makes_that_entity_unavailable(hass: HomeAssistant, setup_entry) -> None:
+async def test_record_without_properties_makes_that_entity_unavailable(
+    hass: HomeAssistant, setup_entry, settle
+) -> None:
     """An appliance with nothing reported has no state to show; it must not freeze on stale values."""
     entry, stub = await setup_entry([LEGACY_AC])
     del stub.records["AC-LEGACY-1"]["properties"]
 
     await entry.runtime_data.async_refresh()
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
 
     assert hass.states.get(entity_id_for(hass, "climate", "AC-LEGACY-1")).state == "unavailable"
 
@@ -153,8 +162,9 @@ async def test_dehumidifier_without_timers_gets_none(hass: HomeAssistant, setup_
     assert entity_id_for(hass, "number", "DH-1_timer_on") is None
 
 
+@pytest.mark.parametrize("auth_method", ["password"])
 async def test_minor_version_1_entry_migrates_to_the_password_method(
-    hass: HomeAssistant, frigidaire_stub, tmp_path
+    hass: HomeAssistant, frigidaire_stub, tmp_path, settle
 ) -> None:
     """Entries from before the sign-in menu signed in with a password; upgrading changes nothing else."""
     hass.config.config_dir = str(tmp_path)
@@ -166,7 +176,7 @@ async def test_minor_version_1_entry_migrates_to_the_password_method(
     before = registry.async_get_or_create("climate", DOMAIN, "AC-LEGACY-1", config_entry=entry)
 
     assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
 
     assert entry.state is ConfigEntryState.LOADED
     assert (entry.version, entry.minor_version) == (1, 2)
@@ -191,11 +201,11 @@ async def test_migration_leaves_the_session_file_alone(hass: HomeAssistant, tmp_
     assert session_file.read_text() == contents
 
 
-async def test_current_entry_is_not_migrated_again(hass: HomeAssistant, setup_entry) -> None:
+async def test_current_entry_is_not_migrated_again(hass: HomeAssistant, setup_entry, method) -> None:
     entry, _stub = await setup_entry([LEGACY_AC])
 
     assert entry.minor_version == 2
-    assert entry.data == {"auth_method": "password", **CREDENTIALS}
+    assert entry.data == method.entry_data
 
 
 async def test_entry_from_a_newer_major_version_is_refused(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
@@ -221,7 +231,7 @@ async def test_unknown_sign_in_method_fails_setup(hass: HomeAssistant, frigidair
     assert stub.connect_count == 0
 
 
-@both_methods
+@every_method
 async def test_unload_closes_the_backend(hass: HomeAssistant, setup_entry) -> None:
     entry, stub = await setup_entry([LEGACY_AC])
     assert not stub.closed
@@ -231,18 +241,19 @@ async def test_unload_closes_the_backend(hass: HomeAssistant, setup_entry) -> No
     assert stub.closed
 
 
-async def test_removing_the_entry_deletes_its_session_file(hass: HomeAssistant, setup_entry, tmp_path) -> None:
+@pytest.mark.parametrize("auth_method", ["password"])
+async def test_removing_the_entry_deletes_its_session_file(hass: HomeAssistant, setup_entry, tmp_path, settle) -> None:
     entry, _stub = await setup_entry([LEGACY_AC])
     session_file = tmp_path / f"frigidaire-{entry.entry_id}.json"
     assert os.path.exists(session_file)
 
     await hass.config_entries.async_remove(entry.entry_id)
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
 
     assert not os.path.exists(session_file)
 
 
-@both_methods
+@every_method
 async def test_removing_the_entry_calls_its_methods_cleanup(hass: HomeAssistant, setup_entry, settle, method) -> None:
     entry, _stub = await setup_entry([LEGACY_AC])
 

@@ -13,10 +13,12 @@ from pytest_homeassistant_custom_component.components.diagnostics import (
 )
 from pytest_homeassistant_custom_component.typing import ClientSessionGenerator
 
+from custom_components.frigidaire.auth import METHODS
+
 DOMAIN = "frigidaire"
 
 
-@pytest.mark.parametrize("auth_method", ["password", "api_key"])
+@pytest.mark.parametrize("auth_method", list(METHODS))
 async def test_config_entry_diagnostics(
     hass: HomeAssistant, hass_client: ClientSessionGenerator, setup_entry, method
 ) -> None:

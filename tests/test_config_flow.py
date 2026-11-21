@@ -3,8 +3,6 @@
 The setup and reauth tests are written once and run for each sign-in method.
 """
 
-from datetime import timedelta
-
 import frigidaire
 import pytest
 from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC
@@ -12,13 +10,13 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+from custom_components.frigidaire.auth import METHODS
 
 DOMAIN = "frigidaire"
 CREDENTIALS = {"username": "user@example.com", "password": "secret"}
 
-both_methods = pytest.mark.parametrize("auth_method", ["password", "api_key"])
+every_method = pytest.mark.parametrize("auth_method", list(METHODS))
 
 
 async def start_user_flow(hass: HomeAssistant, method: str = "password"):
@@ -47,11 +45,11 @@ async def test_user_flow_starts_with_a_menu_of_sign_in_methods(hass: HomeAssista
 
     assert result["type"] is FlowResultType.MENU
     assert result["step_id"] == "user"
-    # Email and password first; the API key, for Google or Apple sign-in, second.
-    assert result["menu_options"] == ["password", "api_key"]
+    # One option per sign-in method, in menu order (each method's own tests check its place).
+    assert result["menu_options"] == list(METHODS)
 
 
-@both_methods
+@every_method
 async def test_user_flow_creates_entry_with_per_device_options(
     hass: HomeAssistant, frigidaire_stub, method, settle, tmp_path
 ) -> None:
@@ -79,7 +77,7 @@ async def test_user_flow_creates_entry_with_per_device_options(
     assert stub.credentials == method.setup_input
 
 
-@both_methods
+@every_method
 async def test_user_flow_unique_id_is_the_lowercased_account_email(
     hass: HomeAssistant, frigidaire_stub, method, settle, tmp_path
 ) -> None:
@@ -95,7 +93,7 @@ async def test_user_flow_unique_id_is_the_lowercased_account_email(
     assert hass.config_entries.async_entries(DOMAIN)[0].unique_id == "user@example.com"
 
 
-@both_methods
+@every_method
 async def test_user_flow_rejected_credentials_show_invalid_auth(
     hass: HomeAssistant, frigidaire_stub, method, tmp_path
 ) -> None:
@@ -110,6 +108,8 @@ async def test_user_flow_rejected_credentials_show_invalid_auth(
     assert result["errors"] == {"base": "invalid_auth"}
 
 
+# LoginError and its codes are the password method's login.
+@pytest.mark.parametrize("auth_method", ["password"])
 async def test_user_flow_rejected_login_without_a_credential_code_shows_invalid_auth(
     hass: HomeAssistant, frigidaire_stub, tmp_path
 ) -> None:
@@ -125,19 +125,21 @@ async def test_user_flow_rejected_login_without_a_credential_code_shows_invalid_
     assert result["errors"] == {"base": "invalid_auth"}
 
 
-async def test_transient_login_failure_during_a_poll_does_not_start_reauth(hass: HomeAssistant, setup_entry) -> None:
+@pytest.mark.parametrize("auth_method", ["password"])
+async def test_transient_login_failure_during_a_poll_does_not_start_reauth(
+    hass: HomeAssistant, setup_entry, poll
+) -> None:
     """Only a credential rejection should prompt for a password; anything else keeps retrying."""
     entry, stub = await setup_entry([LEGACY_AC])
     stub.error = frigidaire.LoginError("Failed to authenticate, sessionInfo was not in response (errorCode=206001)")
 
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll()
 
     assert hass.config_entries.flow.async_progress_by_handler(DOMAIN) == []
     assert entry.state is ConfigEntryState.LOADED
 
 
-@both_methods
+@every_method
 async def test_user_flow_api_failure_shows_cannot_connect(
     hass: HomeAssistant, frigidaire_stub, method, tmp_path
 ) -> None:
@@ -150,7 +152,7 @@ async def test_user_flow_api_failure_shows_cannot_connect(
     assert result["errors"] == {"base": "cannot_connect"}
 
 
-@both_methods
+@every_method
 async def test_user_flow_without_appliances_shows_no_appliances(
     hass: HomeAssistant, frigidaire_stub, method, tmp_path
 ) -> None:
@@ -162,7 +164,7 @@ async def test_user_flow_without_appliances_shows_no_appliances(
     assert result["errors"] == {"base": "no_appliances"}
 
 
-@both_methods
+@every_method
 async def test_user_flow_aborts_for_an_already_configured_account(hass: HomeAssistant, setup_entry, method) -> None:
     await setup_entry([LEGACY_AC])
 
@@ -195,7 +197,7 @@ async def test_the_same_account_cannot_be_added_with_the_other_method(
     assert len(hass.config_entries.async_entries(DOMAIN)) == 1
 
 
-@both_methods
+@every_method
 async def test_rejected_credentials_during_a_poll_start_reauth(hass: HomeAssistant, setup_entry, poll, method) -> None:
     entry, stub = await setup_entry([LEGACY_AC])
 
@@ -206,7 +208,7 @@ async def test_rejected_credentials_during_a_poll_start_reauth(hass: HomeAssista
     assert flow["step_id"] == "reauth_confirm"
 
 
-@both_methods
+@every_method
 async def test_reauth_asks_for_the_entry_methods_credentials(hass: HomeAssistant, setup_entry, poll, method) -> None:
     _entry, stub = await setup_entry([LEGACY_AC])
     flow = await start_reauth(hass, stub, poll, method)
@@ -218,7 +220,7 @@ async def test_reauth_asks_for_the_entry_methods_credentials(hass: HomeAssistant
     assert result["description_placeholders"]["username"] == "user@example.com"
 
 
-@both_methods
+@every_method
 async def test_reauth_with_working_credentials_updates_and_reloads_the_entry(
     hass: HomeAssistant, setup_entry, poll, settle, method, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -239,7 +241,7 @@ async def test_reauth_with_working_credentials_updates_and_reloads_the_entry(
     assert "update listener" not in caplog.text
 
 
-@both_methods
+@every_method
 async def test_reauth_with_wrong_credentials_shows_invalid_auth(hass: HomeAssistant, setup_entry, poll, method) -> None:
     entry, stub = await setup_entry([LEGACY_AC])
     flow = await start_reauth(hass, stub, poll, method)

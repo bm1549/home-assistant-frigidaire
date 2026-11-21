@@ -7,9 +7,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 
+from custom_components.frigidaire.auth import METHODS
+
 DOMAIN = "frigidaire"
 
-both_methods = pytest.mark.parametrize("auth_method", ["password", "api_key"])
+every_method = pytest.mark.parametrize("auth_method", list(METHODS))
 
 
 def entity_id(hass: HomeAssistant, domain: str, unique_id: str) -> str:
@@ -20,7 +22,7 @@ def rejected() -> frigidaire.CommandRejectedError:
     return frigidaire.CommandRejectedError("The appliance refused the request in its current state", status_code=406)
 
 
-@both_methods
+@every_method
 async def test_a_rejected_humidity_target_says_which_modes_allow_it(hass: HomeAssistant, setup_entry, settle) -> None:
     entry, stub = await setup_entry([DEHUMIDIFIER])
     stub.command_error = rejected()
@@ -45,7 +47,7 @@ async def test_a_rejected_humidity_target_says_which_modes_allow_it(hass: HomeAs
     assert entry.runtime_data.data["DH-1"].target_humidity == 40
 
 
-@both_methods
+@every_method
 async def test_any_other_rejected_command_raises_the_generic_error(hass: HomeAssistant, setup_entry) -> None:
     _entry, stub = await setup_entry([with_reported(LEGACY_AC, mode="OFF")])
     stub.command_error = rejected()
