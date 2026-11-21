@@ -8,6 +8,8 @@
 
 A Home Assistant integration for Frigidaire WiFi-connected appliances, using the Frigidaire 2.0 (Electrolux) cloud API.
 
+This integration needs Frigidaire's cloud and has no local-network mode. For local-only control, the community project [esphome-frigidaire-ac](https://github.com/BatemanJo9/esphome-frigidaire-ac) replaces the appliance's Wi-Fi board with an ESP32 running ESPHome; it is documented for an FHWW082WCE window AC. It requires opening the unit and wiring in a level shifter, and it is third-party and has not been tested by this integration's maintainer.
+
 ## Supported Devices
 
 - **Air Conditioners** — window, portable, and inverter models
