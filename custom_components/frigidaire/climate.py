@@ -134,26 +134,33 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
         return super().available and (appliance.state is not None or appliance.mode is not None)
 
     @property
-    def temperature_unit(self) -> str:
+    def native_temperature_unit(self) -> str:
         return FRIGIDAIRE_TO_HA_UNIT.get(self.appliance.temperature_unit, UnitOfTemperature.FAHRENHEIT)
 
     @property
     def min_temp(self) -> float:
-        return 60 if self.temperature_unit == UnitOfTemperature.FAHRENHEIT else 16
+        return 60 if self.native_temperature_unit == UnitOfTemperature.FAHRENHEIT else 16
 
     @property
     def max_temp(self) -> float:
-        return 90 if self.temperature_unit == UnitOfTemperature.FAHRENHEIT else 32
+        return 90 if self.native_temperature_unit == UnitOfTemperature.FAHRENHEIT else 32
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         return self.appliance.ambient_temperature
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         if (temperature := self._optimistic.get("temperature")) is not None:
             return temperature
         return self.appliance.target_temperature
+
+    # Home Assistant before 2026.11 only reads the old names. From 2026.11 on, core uses the native_*
+    # ones and does not warn about the old names when a class provides both. Drop these once
+    # hacs.json's minimum is 2026.11 or later.
+    temperature_unit = native_temperature_unit
+    current_temperature = native_current_temperature
+    target_temperature = native_target_temperature
 
     @property
     def hvac_mode(self) -> HVACMode | None:
@@ -249,7 +256,7 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
     async def async_set_temperature(self, **kwargs: Any) -> None:
         if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
-        unit = HA_TO_FRIGIDAIRE_UNIT[self.temperature_unit]
+        unit = HA_TO_FRIGIDAIRE_UNIT[self.native_temperature_unit]
         await self.async_command(
             self.client.set_temperature(self.appliance, int(temperature), unit), temperature=float(int(temperature))
         )
