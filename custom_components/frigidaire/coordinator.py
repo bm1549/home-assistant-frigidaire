@@ -96,6 +96,8 @@ class FrigidaireCoordinator(DataUpdateCoordinator[dict[str, Appliance]]):
         self._stream_has_connected = False
         self._stream_failures = 0
         self._cancel_stream_retry: CALLBACK_TYPE | None = None
+        # Set while a reconnect resync has run within the last resync interval.
+        self._cancel_reconnect_resync_hold: CALLBACK_TYPE | None = None
         # Opt-in per air conditioner: the API exposes no compressor telemetry, so this
         # estimates it from the temperatures. Kept here so the climate entity and the
         # diagnostic sensor share one estimate.
@@ -139,7 +141,13 @@ class FrigidaireCoordinator(DataUpdateCoordinator[dict[str, Appliance]]):
         data = {appliance.appliance_id: self._ingest(appliance) for appliance in appliances}
         for appliance_id in set(self.data or {}) - set(data):
             previous = self.data[appliance_id]
-            _LOGGER.warning("%s (%s) is no longer on the account", previous.nickname, appliance_id)
+            # Not "no longer on the account": a backend may skip an appliance it could not read
+            # this time, and it comes back on a later fetch.
+            _LOGGER.warning(
+                "%s (%s) was not in the latest fetch; its entities are unavailable until it is back",
+                previous.nickname,
+                appliance_id,
+            )
         return data
 
     def _backoff(self) -> timedelta:
@@ -177,6 +185,7 @@ class FrigidaireCoordinator(DataUpdateCoordinator[dict[str, Appliance]]):
         """Run the backend's live update stream for the life of the entry. Call once, after setup."""
         assert self.config_entry is not None
         self.config_entry.async_on_unload(self._async_cancel_stream_retry)
+        self.config_entry.async_on_unload(self._async_end_reconnect_resync_hold)
         self._async_start_stream()
 
     @callback
@@ -211,14 +220,25 @@ class FrigidaireCoordinator(DataUpdateCoordinator[dict[str, Appliance]]):
     def _handle_stream_connect(self) -> None:
         self.stream_connected = True
         self._stream_failures = 0
-        if self._stream_has_connected and not self._quota_hold:
+        if self._stream_has_connected and not self._quota_hold and self._cancel_reconnect_resync_hold is None:
             # Whatever changed while the stream was down was never pushed; one full fetch catches up.
-            # While a quota error is waited out, the fetch that ends the wait does that instead.
+            # While a quota error is waited out, the fetch that ends the wait does that instead. At
+            # most one per resync interval, so a flapping stream cannot spend the daily quota; the
+            # scheduled resync catches up after any reconnect skipped here.
             assert self.config_entry is not None
             self.config_entry.async_create_background_task(
                 self.hass, self.async_request_refresh(), name="frigidaire resync after reconnect"
             )
+            self._cancel_reconnect_resync_hold = async_call_later(
+                self.hass, self._interval, self._async_end_reconnect_resync_hold
+            )
         self._stream_has_connected = True
+
+    @callback
+    def _async_end_reconnect_resync_hold(self, _now: datetime | None = None) -> None:
+        if self._cancel_reconnect_resync_hold is not None:
+            self._cancel_reconnect_resync_hold()
+            self._cancel_reconnect_resync_hold = None
 
     @callback
     def _handle_stream_disconnect(self) -> None:

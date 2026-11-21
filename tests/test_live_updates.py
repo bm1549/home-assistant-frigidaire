@@ -90,6 +90,31 @@ async def test_each_reconnect_triggers_one_full_resync(hass: HomeAssistant, setu
     assert climate_state(hass) == "fan_only"
 
 
+async def test_reconnect_resyncs_are_capped_at_one_per_resync_interval(
+    hass: HomeAssistant, setup_entry, settle, poll
+) -> None:
+    """A flapping stream must not spend the daily quota on resyncs."""
+    _entry, stub = await setup_entry([LEGACY_AC])
+    await stub.reconnect()
+    await settle()
+    assert stub.fetch_count == 2
+
+    # Reconnects spaced like the library's backoff (at most 120 s): past the refresh debouncer,
+    # inside the resync interval.
+    for seconds in (121, 242):
+        await poll(seconds=seconds)
+        await stub.reconnect()
+        await settle()
+    assert stub.fetch_count == 2
+
+    # The scheduled resync catches up, and the next reconnect may resync again.
+    await poll(seconds=302)
+    assert stub.fetch_count == 3
+    await stub.reconnect()
+    await settle()
+    assert stub.fetch_count == 4
+
+
 async def test_a_rejected_stream_starts_reauth(hass: HomeAssistant, frigidaire_stub, add_entry, method, settle) -> None:
     stub = frigidaire_stub([LEGACY_AC])
     stub.listen_error = frigidaire.AuthenticationError("Rejected", status_code=401)
