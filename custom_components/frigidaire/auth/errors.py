@@ -11,3 +11,7 @@ class CannotConnect(HomeAssistantError):
 
 class InvalidAuth(HomeAssistantError):
     """The credentials were rejected, or the account cannot sign in this way."""
+
+
+class CredentialsInUse(HomeAssistantError):
+    """The credentials are the ones another configured entry is using; validating them would harm it."""

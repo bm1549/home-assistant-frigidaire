@@ -18,8 +18,14 @@ from .const import DOMAIN
 from .coordinator import FrigidaireConfigEntry
 
 TO_REDACT = {
+    # Credentials of either sign-in method.
     "username",
     "password",
+    "api_key",
+    "access_token",
+    "refresh_token",
+    # Identifiers in the records.
+    "serialNumber",
     "applianceId",
     "deviceId",
     "TimeZoneStandardName",
@@ -63,14 +69,22 @@ def _describe(appliance: Appliance) -> dict[str, Any]:
     return {"parsed": parsed, "raw": async_redact_data(appliance.raw, TO_REDACT)}
 
 
+def _options(entry: FrigidaireConfigEntry) -> dict[str, Any]:
+    """The per-appliance options, keyed by position instead of appliance id.
+
+    Options are keyed by appliance id, and Electrolux appliance ids are built from the serial
+    number, which the records have redacted.
+    """
+    return {f"appliance_{index}": options for index, options in enumerate(entry.options.values())}
+
+
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: FrigidaireConfigEntry) -> dict[str, Any]:
     coordinator = entry.runtime_data
     return {
-        "entry": {
-            "data": async_redact_data(dict(entry.data), TO_REDACT),
-            # Options are keyed by appliance id, which encodes the serial number; list them by position instead.
-            "options": {f"appliance_{index}": options for index, options in enumerate(entry.options.values())},
-        },
+        "entry": {"data": async_redact_data(dict(entry.data), TO_REDACT), "options": _options(entry)},
+        "auth_method": entry.data.get("auth_method"),
+        "live_updates": coordinator.client.supports_live_updates,
+        "stream_connected": coordinator.stream_connected,
         "last_update_success": coordinator.last_update_success,
         "appliances": [_describe(appliance) for appliance in (coordinator.data or {}).values()],
     }

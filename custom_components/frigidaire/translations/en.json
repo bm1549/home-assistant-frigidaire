@@ -1,12 +1,13 @@
 {
     "config": {
         "abort": {
-            "already_configured": "Device is already configured",
+            "already_configured": "This Frigidaire account is already set up. To change how it signs in, delete the existing entry and add it again with the other method. Entity history and per-appliance options do not carry over.",
             "reauth_successful": "Re-authentication was successful",
             "wrong_account": "These credentials belong to a different Frigidaire account than this entry."
         },
         "error": {
             "cannot_connect": "Failed to connect",
+            "credentials_in_use": "These tokens are the ones an entry that is already set up is using. Checking them here would use up its refresh token. Generate new tokens on the Electrolux developer portal for this entry.",
             "invalid_auth": "Invalid authentication",
             "no_appliances": "No Frigidaire appliances found on this account.",
             "unknown": "Unexpected error"
@@ -14,8 +15,10 @@
         "step": {
             "user": {
                 "title": "Sign in to Frigidaire",
+                "description": "Choose how you sign in to the Frigidaire app. If you sign in with Google or Apple, use an API key. The method cannot be changed later without deleting the entry and adding it again.",
                 "menu_options": {
-                    "password": "Email and password"
+                    "password": "Email and password",
+                    "api_key": "API key (beta), required for Google or Apple sign-in"
                 }
             },
             "password": {
@@ -23,6 +26,20 @@
                 "data": {
                     "password": "Password",
                     "username": "Username"
+                }
+            },
+            "api_key": {
+                "title": "API key (beta)",
+                "description": "Sign in to the [Electrolux developer portal]({portal_url}) with your Frigidaire account, including Google or Apple sign-in, and create an API key. Copy three values from the portal: the API key, the access token and the refresh token.\n\nThe refresh token works only once: Home Assistant replaces it as it goes, so do not use the same tokens in another Home Assistant or a script, or each will sign the other out. This sign-in method is in beta.",
+                "data": {
+                    "api_key": "API key",
+                    "access_token": "Access token",
+                    "refresh_token": "Refresh token"
+                },
+                "data_description": {
+                    "api_key": "The API key shown on the developer portal dashboard.",
+                    "access_token": "The access token generated with the API key.",
+                    "refresh_token": "The refresh token generated with the access token. It works only once."
                 }
             },
             "device": {
@@ -52,9 +69,12 @@
             },
             "reauth_confirm": {
                 "title": "Re-authenticate Frigidaire",
-                "description": "The password for {username} was rejected. Enter the current password.",
+                "description": "Frigidaire no longer accepts the saved sign-in details for {username}. Enter the current ones for this entry's sign-in method: the password, or for an API key entry a new API key, access token and refresh token from the Electrolux developer portal.\n\nThe sign-in method cannot be changed here. To switch between email and password and an API key, delete this entry and add it again; entity history and per-appliance options do not carry over.",
                 "data": {
-                    "password": "Password"
+                    "password": "Password",
+                    "api_key": "API key",
+                    "access_token": "Access token",
+                    "refresh_token": "Refresh token"
                 }
             }
         }
@@ -97,6 +117,14 @@
                     "on": "Full"
                 }
             }
+        }
+    },
+    "exceptions": {
+        "command_rejected": {
+            "message": "{device_name} refused the command in its current state."
+        },
+        "humidity_rejected": {
+            "message": "{device_name} accepts a target humidity only in Dry or Continuous mode."
         }
     }
 }

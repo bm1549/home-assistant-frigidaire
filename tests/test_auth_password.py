@@ -48,10 +48,13 @@ def test_menu_option_reads_email_and_password() -> None:
     en = Path(__file__).resolve().parents[1] / "custom_components" / "frigidaire" / "translations" / "en.json"
     config = json.loads(en.read_text())["config"]
     assert config["step"]["user"]["menu_options"]["password"] == "Email and password"
-    # The reauth text is unchanged from before the sign-in menu.
-    assert config["step"]["reauth_confirm"]["description"] == (
-        "The password for {username} was rejected. Enter the current password."
-    )
+    # The reauth text is shared by every method: it asks for the password, and says that changing
+    # method means deleting the entry and adding it again.
+    description = config["step"]["reauth_confirm"]["description"]
+    assert description.startswith("Frigidaire no longer accepts the saved sign-in details for {username}.")
+    assert "the password, or for an API key entry" in description
+    assert "To switch between email and password and an API key, delete this entry and add it again" in description
+    assert config["step"]["reauth_confirm"]["data"]["password"] == "Password"
 
 
 async def test_entries_poll_every_30_seconds(hass: HomeAssistant, setup_entry) -> None:

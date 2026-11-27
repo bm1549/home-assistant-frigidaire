@@ -7,13 +7,14 @@ from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import area_registry as ar
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from frigidaire import Appliance, AsyncFrigidaire
+from frigidaire import Appliance, AsyncFrigidaire, CommandRejectedError
 
 from .const import DOMAIN
 from .coordinator import FrigidaireCoordinator
@@ -109,13 +110,27 @@ class FrigidaireEntity(CoordinatorEntity[FrigidaireCoordinator]):
     def available(self) -> bool:
         return super().available and self.appliance_id in (self.coordinator.data or {})
 
-    async def async_command(self, command: Awaitable[None], **optimistic: Any) -> None:
+    async def async_command(
+        self, command: Awaitable[None], *, rejected: str = "command_rejected", **optimistic: Any
+    ) -> None:
         """Send one library command, then hold ``optimistic`` values and refresh this appliance.
 
         Every setter goes through here. A failed command raises before anything is held, so the
-        UI never shows a value the appliance did not accept.
+        UI never shows a value the appliance did not accept. An appliance refusing the command in
+        its current state raises a translated error the user sees; ``rejected`` names its message
+        in ``translations/en.json``'s ``exceptions``. The appliance is still refreshed then, since
+        the earlier steps of a sequence (such as the mode change before a humidity target) may
+        have been applied.
         """
-        await command
+        try:
+            await command
+        except CommandRejectedError as err:
+            await self.coordinator.async_refresh_appliance(self.appliance)
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key=rejected,
+                translation_placeholders={"device_name": self.appliance.nickname},
+            ) from err
         for key, value in optimistic.items():
             self._optimistic.set(key, value)
         if optimistic and self.hass is not None:

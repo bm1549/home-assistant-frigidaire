@@ -12,8 +12,9 @@ from __future__ import annotations
 
 from types import ModuleType
 
-from . import password
+from . import api_key, password
 
 METHODS: dict[str, ModuleType] = {
     password.METHOD: password,
+    api_key.METHOD: api_key,
 }

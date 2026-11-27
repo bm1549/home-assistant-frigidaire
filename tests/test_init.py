@@ -227,7 +227,10 @@ async def test_unknown_sign_in_method_fails_setup(hass: HomeAssistant, frigidair
     assert not await hass.config_entries.async_setup(entry.entry_id)
 
     assert entry.state is ConfigEntryState.SETUP_ERROR
-    assert entry.reason == "The sign-in method 'carrier_pigeon' is not available; delete this entry and add it again"
+    assert entry.reason == (
+        "The sign-in method 'carrier_pigeon' is not available; delete this entry and add it again, "
+        "with an API key from the Electrolux developer portal"
+    )
     assert stub.connect_count == 0
 
 
