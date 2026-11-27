@@ -1,12 +1,8 @@
 """Opt-in temperature-based compressor estimate."""
 
-from datetime import timedelta
-
 from frigidaire.testing import LEGACY_AC, TELICA_AC, with_reported
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 ESTIMATE_ON = {"AC-LEGACY-1": {"compressor": True, "cool_hysteresis": 0.0, "compressor_off_delay": 0}}
 
@@ -33,12 +29,11 @@ async def test_room_above_target_estimates_running(hass: HomeAssistant, setup_en
     assert climate_state(hass, "AC-LEGACY-1").attributes["hvac_action"] == "cooling"
 
 
-async def test_room_below_target_estimates_idle_after_off_delay(hass: HomeAssistant, setup_entry) -> None:
+async def test_room_below_target_estimates_idle_after_off_delay(hass: HomeAssistant, setup_entry, poll) -> None:
     _entry, stub = await setup_entry([LEGACY_AC], options=ESTIMATE_ON)
     stub.records["AC-LEGACY-1"]["properties"]["reported"]["ambientTemperatureF"] = 70
 
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll()
 
     assert hass.states.get(estimate_id(hass, "AC-LEGACY-1")).state == "off"
     assert climate_state(hass, "AC-LEGACY-1").attributes["hvac_action"] == "idle"
@@ -52,12 +47,11 @@ async def test_fan_only_beats_estimate(hass: HomeAssistant, setup_entry) -> None
     assert climate_state(hass, "AC-LEGACY-1").attributes["hvac_action"] == "fan"
 
 
-async def test_estimate_beats_dry(hass: HomeAssistant, setup_entry) -> None:
+async def test_estimate_beats_dry(hass: HomeAssistant, setup_entry, poll) -> None:
     """The estimate is checked before DRY, so a satisfied dry cycle reports idle, not drying."""
     await setup_entry([with_reported(LEGACY_AC, mode="DRY", ambientTemperatureF=70)], options=ESTIMATE_ON)
 
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=31))
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await poll()
 
     assert hass.states.get(estimate_id(hass, "AC-LEGACY-1")).state == "off"
     assert climate_state(hass, "AC-LEGACY-1").attributes["hvac_action"] == "idle"
@@ -71,3 +65,19 @@ async def test_reported_mode_state_beats_estimate(hass: HomeAssistant, setup_ent
 
     assert hass.states.get(estimate_id(hass, "AC-TELICA-1")).state == "off"
     assert climate_state(hass, "AC-TELICA-1").attributes["hvac_action"] == "cooling"
+
+
+async def test_refresh_after_a_command_updates_the_estimate(hass: HomeAssistant, setup_entry, settle) -> None:
+    """The single-appliance refresh feeds the estimate exactly like a poll does."""
+    _entry, stub = await setup_entry([LEGACY_AC], options=ESTIMATE_ON)
+    assert hass.states.get(estimate_id(hass, "AC-LEGACY-1")).state == "on"
+    stub.records["AC-LEGACY-1"]["properties"]["reported"]["ambientTemperatureF"] = 70
+
+    entity_id = er.async_get(hass).async_get_entity_id("climate", "frigidaire", "AC-LEGACY-1")
+    await hass.services.async_call(
+        "climate", "set_fan_mode", {"entity_id": entity_id, "fan_mode": "high"}, blocking=True
+    )
+    await settle()
+
+    assert stub.fetch_count == 1
+    assert hass.states.get(estimate_id(hass, "AC-LEGACY-1")).state == "off"

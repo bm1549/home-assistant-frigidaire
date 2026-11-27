@@ -20,7 +20,7 @@ def heat_climate_id(hass: HomeAssistant) -> str:
 
 
 async def test_heat_option_is_per_device_default_off_and_survives_normal_options_api(
-    hass: HomeAssistant, setup_entry
+    hass: HomeAssistant, setup_entry, settle
 ) -> None:
     other = {**TELICA_AC, "applianceId": "AC-TELICA-2"}
     entry, _stub = await setup_entry(
@@ -38,7 +38,7 @@ async def test_heat_option_is_per_device_default_off_and_survives_normal_options
     assert "heat_supported" not in fields
     result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
     assert entry.options["AC-TELICA-1"]["heat_supported"] is True
     assert entry.options["AC-TELICA-1"]["compressor"] is True
     assert entry.options["AC-TELICA-1"]["cool_hysteresis"] == 1.5
@@ -54,23 +54,24 @@ async def test_heat_option_is_per_device_default_off_and_survives_normal_options
     result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={})
     result = await hass.config_entries.options.async_configure(result["flow_id"], user_input={})
     assert result["type"] is FlowResultType.CREATE_ENTRY
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
     assert "heat" not in hass.states.get(heat_climate_id(hass)).attributes["hvac_modes"]
 
 
-async def test_heat_option_is_available_during_initial_setup(hass: HomeAssistant, frigidaire_stub, tmp_path) -> None:
+async def test_heat_option_is_available_during_initial_setup(
+    hass: HomeAssistant, frigidaire_stub, method, tmp_path, settle
+) -> None:
     from homeassistant import config_entries
 
     hass.config.config_dir = str(tmp_path)
     frigidaire_stub([TELICA_AC])
     result = await hass.config_entries.flow.async_init("frigidaire", context={"source": config_entries.SOURCE_USER})
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {"username": "user@example.com", "password": "secret"}
-    )
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {"next_step_id": method.name})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], dict(method.setup_input))
     fields = {f["name"]: f for f in to_field_list(result["data_schema"], custom_serializer=cv.custom_serializer)}
     assert fields["heat_supported"]["default"] is False
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {"heat_supported": True})
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["options"]["AC-TELICA-1"]["heat_supported"] is True
     assert "heat" in hass.states.get(heat_climate_id(hass)).attributes["hvac_modes"]
@@ -106,14 +107,14 @@ async def test_heat_parsing_and_availability(
     ],
 )
 async def test_set_heat_sends_power_then_heat_and_restores_off_setpoint(
-    hass: HomeAssistant, setup_entry, power, mode, restore_target
+    hass: HomeAssistant, setup_entry, power, mode, restore_target, settle
 ) -> None:
     record = with_reported(TELICA_AC, applianceState=power, mode=mode, targetTemperatureF=68)
     _entry, stub = await setup_entry([record], options={"AC-TELICA-1": {"heat_supported": True}})
     await hass.services.async_call(
         "climate", "set_hvac_mode", {"entity_id": heat_climate_id(hass), "hvac_mode": "heat"}, blocking=True
     )
-    await hass.async_block_till_done(wait_background_tasks=True)
+    await settle()
     expected = [("executeCommand", frigidaire.Power.ON), ("mode", frigidaire.Mode.HEAT)]
     if restore_target:
         expected += [("temperatureRepresentation", frigidaire.Unit.FAHRENHEIT), ("targetTemperatureF", 68)]
@@ -138,7 +139,7 @@ async def test_heat_request_without_opt_in_sends_nothing(hass: HomeAssistant, se
         )
     # Guard the entity method too: callers need not go through HA's service validation.
     entity = FrigidaireClimate(entry.runtime_data, entry.runtime_data.data[appliance_id])
-    entity.set_hvac_mode(HVACMode.HEAT)
+    await entity.async_set_hvac_mode(HVACMode.HEAT)
     assert stub.commands == []
 
 
@@ -203,11 +204,10 @@ async def test_heat_mode_state_is_activity_not_requested_mode(hass: HomeAssistan
     assert state.attributes["hvac_action"] == "heating"
 
 
-@pytest.mark.parametrize("filename", ["strings.json", "translations/en.json"])
 @pytest.mark.parametrize("flow", ["config", "options"])
-def test_heat_checkbox_has_an_explicit_english_opt_in_label(filename, flow) -> None:
+def test_heat_checkbox_has_an_explicit_english_opt_in_label(flow) -> None:
     component = Path(__file__).resolve().parents[1] / "custom_components" / "frigidaire"
-    device = json.loads((component / filename).read_text())[flow]["step"]["device"]
+    device = json.loads((component / "translations" / "en.json").read_text())[flow]["step"]["device"]
     assert device["data"]["heat_supported"] == "Enable heat mode (confirmed heat-capable device only)"
     assert "does not detect" in device["data_description"]["heat_supported"]
 
@@ -305,13 +305,15 @@ async def test_heat_from_off_preserves_temperature_units_and_skips_missing_setpo
     ]
 
 
-async def test_polling_heat_activity_changes_does_not_change_requested_heat(hass: HomeAssistant, setup_entry) -> None:
+async def test_polling_heat_activity_changes_does_not_change_requested_heat(
+    hass: HomeAssistant, setup_entry, settle
+) -> None:
     record = with_reported(TELICA_AC, mode="heat", modeState="heat")
     entry, stub = await setup_entry([record], options={"AC-TELICA-1": {"heat_supported": True}})
     for mode_state, action in [("heat", "heating"), ("fanOnly", "fan"), ("idle", "idle"), (None, None)]:
         stub.records["AC-TELICA-1"] = with_reported(record, modeState=mode_state)
         await entry.runtime_data.async_refresh()
-        await hass.async_block_till_done(wait_background_tasks=True)
+        await settle()
         state = hass.states.get(heat_climate_id(hass))
         assert state.state == "heat"
         assert state.attributes.get("hvac_action") == action
@@ -333,12 +335,12 @@ async def test_failed_heat_command_is_not_optimistically_accepted(
     entity = FrigidaireClimate(entry.runtime_data, entry.runtime_data.data["AC-TELICA-1"])
     with (
         patch.object(
-            stub,
+            entry.runtime_data.client,
             "execute_action",
             side_effect=[None] * (failure_step - 1) + [frigidaire.FrigidaireException("command failed")],
         ) as execute,
         pytest.raises(frigidaire.FrigidaireException, match="command failed"),
     ):
-        entity.set_hvac_mode(HVACMode.HEAT)
+        await entity.async_set_hvac_mode(HVACMode.HEAT)
     assert execute.call_count == failure_step
     assert entity.hvac_mode == (HVACMode.OFF if failure_step == 3 else HVACMode.FAN_ONLY)

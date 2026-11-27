@@ -28,7 +28,7 @@ from frigidaire import ApplianceState, Destination, Detail, FanSpeed, Mode, Unit
 
 from .const import CONF_HEAT_SUPPORTED
 from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
-from .entity import FrigidaireEntity, Optimistic, async_add_appliance_entities
+from .entity import FrigidaireEntity, async_add_appliance_entities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -111,7 +111,6 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
 
     def __init__(self, coordinator: FrigidaireCoordinator, appliance) -> None:
         super().__init__(coordinator, appliance, unique_id=appliance.appliance_id, name=appliance.nickname)
-        self._optimistic = Optimistic()
         # Explicit per-appliance opt-in, never inferred from the model name.
         options = coordinator.config_entry.options.get(self.appliance_id, {})
         self._heat_supported = options.get(CONF_HEAT_SUPPORTED, False) is True
@@ -254,45 +253,39 @@ class FrigidaireClimate(FrigidaireEntity, ClimateEntity):
             attributes["active_alerts"] = appliance.alerts
         return attributes
 
-    def set_temperature(self, **kwargs: Any) -> None:
+    async def async_set_temperature(self, **kwargs: Any) -> None:
         if (temperature := kwargs.get(ATTR_TEMPERATURE)) is None:
             return
-        self.client.set_temperature(
-            self.appliance, int(temperature), HA_TO_FRIGIDAIRE_UNIT[self.native_temperature_unit]
+        unit = HA_TO_FRIGIDAIRE_UNIT[self.native_temperature_unit]
+        await self.async_command(
+            self.client.set_temperature(self.appliance, int(temperature), unit), temperature=float(int(temperature))
         )
-        self._optimistic.set("temperature", float(int(temperature)))
-        self.refresh()
 
-    def set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
         if hvac_mode not in self.hvac_modes or (mode := HA_TO_FRIGIDAIRE_HVAC_MODE.get(hvac_mode)) is None:
             return
-        self.client.set_mode(self.appliance, mode)
-        self._optimistic.set("hvac_mode", hvac_mode)
-        self.refresh()
+        await self.async_command(self.client.set_mode(self.appliance, mode), hvac_mode=hvac_mode)
 
-    def set_fan_mode(self, fan_mode: str) -> None:
+    async def async_set_fan_mode(self, fan_mode: str) -> None:
         if (fan_speed := HA_TO_FRIGIDAIRE_FAN_MODE.get(fan_mode)) is None:
             return
-        self.client.set_fan_speed(self.appliance, fan_speed)
-        self._optimistic.set("fan_mode", fan_mode)
-        self.refresh()
+        await self.async_command(self.client.set_fan_speed(self.appliance, fan_speed), fan_mode=fan_mode)
 
-    def set_preset_mode(self, preset_mode: str) -> None:
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
         if preset_mode not in self._attr_preset_modes:
             return
-        self.client.set_sleep_mode(self.appliance, preset_mode == PRESET_SLEEP)
-        self._optimistic.set("preset_mode", preset_mode)
-        self.refresh()
+        await self.async_command(
+            self.client.set_sleep_mode(self.appliance, preset_mode == PRESET_SLEEP), preset_mode=preset_mode
+        )
 
-    def set_swing_mode(self, swing_mode: str) -> None:
+    async def async_set_swing_mode(self, swing_mode: str) -> None:
         if not self._attr_swing_modes or swing_mode not in self._attr_swing_modes:
             return
-        self.client.set_vertical_swing(self.appliance, swing_mode == SWING_VERTICAL)
-        self._optimistic.set("swing_mode", swing_mode)
-        self.refresh()
+        await self.async_command(
+            self.client.set_vertical_swing(self.appliance, swing_mode == SWING_VERTICAL), swing_mode=swing_mode
+        )
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        self._optimistic.expire()
         self._update_swing_support()
         super()._handle_coordinator_update()

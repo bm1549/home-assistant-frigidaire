@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
-from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 
 import frigidaire
 
+from .auth import METHODS
+from .auth.errors import CannotConnect, InvalidAuth
 from .const import (
     BINARY_SENSOR_OPTIONS,
     CONF_COMPRESSOR_ESTIMATE,
@@ -26,12 +27,8 @@ from .const import (
     SWITCH_OPTIONS,
 )
 from .coordinator import FrigidaireConfigEntry
-from .session import session_store
 
 _LOGGER = logging.getLogger(__name__)
-
-STEP_USER_DATA_SCHEMA = vol.Schema({"username": str, "password": str})
-STEP_REAUTH_DATA_SCHEMA = vol.Schema({vol.Required("password"): str})
 
 ALL_OPTIONS = {**SWITCH_OPTIONS, **BINARY_SENSOR_OPTIONS, **SENSOR_OPTIONS}
 
@@ -58,33 +55,19 @@ def _device_schema(current: dict, appliance: frigidaire.Appliance) -> vol.Schema
     return vol.Schema(fields)
 
 
-async def _login(hass: HomeAssistant, username: str, password: str, entry_id: str | None) -> list[frigidaire.Appliance]:
-    """Verify the credentials with a full login and return the account's appliances."""
-
-    def connect() -> list[frigidaire.Appliance]:
-        client = frigidaire.Frigidaire(username, password, timeout=60)
-        # Save the session so setup reuses it instead of minting a second one: Frigidaire
-        # caps active sessions per account.
-        session_store(hass.config.path(), entry_id).save(client.session_key, client.regional_base_url)
-        return client.get_appliances()
-
-    try:
-        return await hass.async_add_executor_job(connect)
-    except frigidaire.LoginError as err:
-        # Any rejected login, not just bad credentials: an account without a password or one
-        # mid-registration is also something to fix on the Frigidaire side, not a connectivity issue.
-        raise InvalidAuth from err
-    except frigidaire.FrigidaireException as err:
-        raise CannotConnect from err
-
-
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for frigidaire."""
+    """Handle a config flow for frigidaire.
+
+    Generic over ``auth.METHODS``: the first step is a menu with one option per sign-in method,
+    each option is a form whose step id is the method's name, and reauth asks again for the
+    entry's own method. Entry data is flat: ``auth_method`` plus that method's credentials.
+    """
 
     VERSION = 1
+    MINOR_VERSION = 2
 
     def __init__(self) -> None:
-        self._user_input: dict[str, Any] = {}
+        self._data: dict[str, Any] = {}
         self._pending_appliances: list[frigidaire.Appliance] = []
         self._options: dict[str, dict[str, Any]] = {}
 
@@ -93,36 +76,46 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return OptionsFlowHandler()
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Handle the initial step."""
-        if user_input is None:
-            return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA)
+        """Choose how to sign in."""
+        return self.async_show_menu(step_id="user", menu_options=list(METHODS))
 
-        errors = {}
+    async def _async_step_method(self, method: str, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """One sign-in method's form: validate, refuse a configured account, then per-device options."""
+        module = METHODS[method]
+        errors: dict[str, str] = {}
 
-        try:
-            appliances = await _login(self.hass, user_input["username"], user_input["password"], entry_id=None)
-        except CannotConnect:
-            errors["base"] = "cannot_connect"
-        except InvalidAuth:
-            errors["base"] = "invalid_auth"
-        except Exception:  # pylint: disable=broad-except
-            _LOGGER.exception("Unexpected exception")
-            errors["base"] = "unknown"
-        else:
-            if not appliances:
-                errors["base"] = "no_appliances"
+        if user_input is not None:
+            # The method may update this in place during validation.
+            data = dict(user_input)
+            try:
+                email, appliances = await module.async_validate(self.hass, data)
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except InvalidAuth:
+                errors["base"] = "invalid_auth"
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
             else:
-                await self.async_set_unique_id(user_input["username"].lower())
-                self._abort_if_unique_id_configured()
-                self._user_input = user_input
-                self._pending_appliances = list(appliances)
-                return await self._async_next_device_step()
+                if not appliances:
+                    errors["base"] = "no_appliances"
+                else:
+                    await self.async_set_unique_id(email.lower())
+                    self._abort_if_unique_id_configured()
+                    self._data = {"auth_method": method, **data}
+                    self._pending_appliances = list(appliances)
+                    return await self._async_next_device_step()
 
-        return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
+        return self.async_show_form(
+            step_id=method,
+            data_schema=module.SCHEMA,
+            description_placeholders=module.DESCRIPTION_PLACEHOLDERS,
+            errors=errors,
+        )
 
     async def _async_next_device_step(self) -> ConfigFlowResult:
         if not self._pending_appliances:
-            return self.async_create_entry(title="Frigidaire", data=self._user_input, options=self._options)
+            return self.async_create_entry(title="Frigidaire", data=self._data, options=self._options)
         return await self.async_step_device()
 
     async def async_step_device(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -141,30 +134,53 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
-        """The stored password stopped working."""
+        """The stored credentials stopped working."""
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
-        """Ask for a new password and reload the entry with it."""
+        """Ask again for the entry's own method's credentials and reload the entry with them.
+
+        The method cannot change here: switching means deleting the entry and adding it again.
+        """
         entry = self._get_reauth_entry()
-        errors = {}
+        module = METHODS[entry.data["auth_method"]]
+        errors: dict[str, str] = {}
 
         if user_input is not None:
+            data = {**entry.data, **user_input}
             try:
-                await _login(self.hass, entry.data["username"], user_input["password"], entry.entry_id)
+                email, _appliances = await module.async_validate(self.hass, data, entry)
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
             else:
-                return self.async_update_reload_and_abort(entry, data_updates={"password": user_input["password"]})
+                if entry.unique_id is not None and email.lower() != entry.unique_id:
+                    return self.async_abort(reason="wrong_account")
+                return self.async_update_reload_and_abort(entry, data=data)
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=STEP_REAUTH_DATA_SCHEMA,
-            description_placeholders={"username": entry.data["username"]},
+            data_schema=module.REAUTH_SCHEMA,
+            description_placeholders=module.reauth_description_placeholders(entry),
             errors=errors,
         )
+
+
+def _method_step(method: str) -> Callable[..., Coroutine[Any, Any, ConfigFlowResult]]:
+    async def step(self: ConfigFlow, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        return await self._async_step_method(method, user_input)
+
+    step.__name__ = f"async_step_{method}"
+    step.__doc__ = f"The {method} sign-in form."
+    return step
+
+
+for _method in METHODS:
+    setattr(ConfigFlow, f"async_step_{_method}", _method_step(_method))
 
 
 class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
@@ -201,11 +217,3 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithReload):
             data_schema=_device_schema(current, appliance),
             description_placeholders={"device_name": appliance.nickname},
         )
-
-
-class CannotConnect(HomeAssistantError):
-    """Error to indicate we cannot connect."""
-
-
-class InvalidAuth(HomeAssistantError):
-    """Error to indicate there is invalid auth."""

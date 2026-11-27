@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,7 +10,7 @@ from homeassistant.components.switch import SwitchDeviceClass, SwitchEntity
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from frigidaire import Appliance, Frigidaire
+from frigidaire import Appliance, AsyncFrigidaire
 
 from .coordinator import FrigidaireConfigEntry, FrigidaireCoordinator
 from .entity import FrigidaireEntity, async_add_appliance_entities
@@ -22,7 +22,7 @@ class SwitchDescription:
     name: str
     icon: str
     is_on: Callable[[Appliance], bool | None]
-    set: Callable[[Frigidaire, Appliance, bool], None]
+    set: Callable[[AsyncFrigidaire, Appliance, bool], Awaitable[None]]
     device_class: SwitchDeviceClass | None = None
 
 
@@ -82,10 +82,8 @@ class FrigidaireSwitch(FrigidaireEntity, SwitchEntity):
     def is_on(self) -> bool | None:
         return self._description.is_on(self.appliance)
 
-    def turn_on(self, **kwargs: Any) -> None:
-        self._description.set(self.client, self.appliance, True)
-        self.refresh()
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.async_command(self._description.set(self.client, self.appliance, True))
 
-    def turn_off(self, **kwargs: Any) -> None:
-        self._description.set(self.client, self.appliance, False)
-        self.refresh()
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.async_command(self._description.set(self.client, self.appliance, False))
